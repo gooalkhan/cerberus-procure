@@ -1,0 +1,135 @@
+:root {
+  font-family: 'Inter', system-ui, Avenir, Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+
+  color-scheme: light dark;
+  color: rgba(255, 255, 255, 0.87);
+  background-color: #1a1a1a;
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  display: flex;
+  place-items: center;
+  min-width: 320px;
+  min-height: 100vh;
+}
+
+#root {
+  max-width: 600px;
+  margin: 0 auto;
+  padding: 2rem;
+  text-align: center;
+}
+
+.container {
+  background: #242424;
+  padding: 2.5rem;
+  border-radius: 1.5rem;
+  box-shadow: 0 20px 40px rgba(0,0,0,0.4);
+  border: 1px solid rgba(255,255,255,0.1);
+}
+
+h1 {
+  font-size: 2.5rem;
+  margin-bottom: 2rem;
+  background: linear-gradient(45deg, #646cff, #a855f7);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  font-weight: 800;
+}
+
+.input-group {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 2rem;
+}
+
+input {
+  flex: 1;
+  padding: 0.8rem 1.2rem;
+  border-radius: 0.8rem;
+  border: 1px solid #333;
+  background: #1a1a1a;
+  color: white;
+  font-size: 1rem;
+  transition: border-color 0.25s;
+}
+
+input:focus {
+  outline: none;
+  border-color: #646cff;
+}
+
+button {
+  padding: 0.8rem 1.5rem;
+  border-radius: 0.8rem;
+  border: none;
+  background: #646cff;
+  color: white;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.2s, background 0.2s;
+}
+
+button:hover {
+  background: #535bf2;
+  transform: translateY(-2px);
+}
+
+button:active {
+  transform: translateY(0);
+}
+
+.todo-list {
+  list-style: none;
+  padding: 0;
+  text-align: left;
+}
+
+li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem;
+  background: rgba(255,255,255,0.03);
+  margin-bottom: 0.8rem;
+  border-radius: 1rem;
+  transition: background 0.2s;
+}
+
+li:hover {
+  background: rgba(255,255,255,0.06);
+}
+
+li span {
+  cursor: pointer;
+  flex: 1;
+}
+
+li.completed span {
+  text-decoration: line-through;
+  opacity: 0.5;
+}
+
+.delete-btn {
+  background: #ef4444;
+  padding: 0.4rem 0.8rem;
+  font-size: 0.8rem;
+}
+
+.delete-btn:hover {
+  background: #dc2626;
+}
+
+.loading {
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: #646cff;
+}
