@@ -1,6 +1,6 @@
 package repository
 
-import "cerberus-go/internal/models"
+import  "cerberus-procure/internal/models"
 
 type TodoRepository interface {
 	GetTodos() ([]models.Todo, error)

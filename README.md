@@ -1,56 +1,27 @@
-# Cerberus Go
+# Cerberus Procurement
 
-Cerberus Go is an **Isomorphic Go** project designed to share business logic across multiple distribution targets. Write your core logic once in Go and deploy it as either a static web application (WASM) or a standalone, single-binary web server.
+## 1. 프로젝트 개요 (Overview)
+**Cerberus Procurement**는 복잡한 수입 물류 환경에서 발생하는 다차원적인 비용과 적재 상황을 정밀하게 통제하기 위한 '수입 구매 관리 솔루션'입니다. 
 
-## 🚀 Core Concept: Isomorphic Go
+이 프로젝트는 단일 비즈니스 로직을 작성하여 웹(WASM)과 서버(Server) 모두에서 구동할 수 있는 **Isomorphic Go 아키텍처**를 채택하고 있습니다. 이를 통해 극단적인 N:N:N 혼적 물류를 추적하고, 부대비용을 5대 기준으로 안분하여 정확한 재고 원가(Landed Cost)를 산출하며, 확정된 현금흐름 중심의 통합 매입채무 관리를 목표로 합니다.
 
-This project leverages Go's versatility to run in different environments:
-- **WASM (WebAssembly)**: For client-side logic in static SPA deployments.
-- **Native Go**: For high-performance server-side execution.
-- **Unified Frontend**: A single React codebase that interacts with the business logic through an abstraction layer, regardless of the execution environment.
+## 2. 핵심 기능 (Core Features)
 
-## 🛠 Prerequisites
+### 📦 1. 정밀한 물류 흐름 및 적재 관리 (Logistics Flow)
+*   **N:N:N 복합 혼적 매핑:** 하나의 물리적 컨테이너 안에 단가가 다른 여러 발주(PO) 및 인보이스(CI) 품목이 섞인 상황이라도, `Container_Item` 테이블을 통해 아이템 단위로 완벽하게 추적하고 미선적 잔량을 통제합니다.
+*   **로트(Lot) 기반 입고 분할 (Unpacking):** 국내 창고 입고(GR) 시, 동일한 아이템이라도 유통기한이나 생산 차수 등 물리적 특성에 따라 재고의 최소 단위인 로트(`Inventory_Lot`)로 분할 저장하여 정밀한 선입선출(FIFO)을 지원합니다.
 
-- **Go**: 1.21+
-- **Node.js**: 18+ (for frontend development)
-- **Make**: For build automation
+### 💰 2. 랜딩 코스트 및 원가 산출 (Landing Cost)
+*   **5대 기준 다차원 비용 안분:** 관세, 운임, 하역비 등의 부대비용을 성격에 따라 **금액, 수량, 부피(CBM), 중량, 건(1/N)**의 5가지 수식으로 나누어 최종 로트의 원가로 정밀하게 귀속시킵니다.
+*   **비용 상속 메커니즘 (Carry-over):** 선금 결제 은행 수수료 등 물건이 선적되기 전에 발생한 부대비용이라도 시스템에 선등록해 두면, 실제 물건이 입고되어 로트가 생성되는 시점에 해당 원가에 자동 합산됩니다.
+*   **방어적 원가 마감 (Lock):** 인코텀즈(Incoterms) 조건에 따른 필수 필수 항목(예: 운임, 관세 등)이 입력되지 않으면 원가 확정을 차단합니다. 마감 이후 도착한 지각 청구서는 플러스/마이너스 전표를 추가 발행하는 방식으로 처리하여 기존 재고 자산 가치의 왜곡을 방지합니다.
 
-## 🏗 Build & Deployment
+## 3. 아키텍처 및 기술 스택 (Architecture & Tech Stack)
+본 프로젝트는 **WASM(Public)** 모드와 **Standalone Server(Private)** 모드를 모두 지원하여, 보안 수준 및 배포 환경에 따라 유연한 대응이 가능합니다.
 
-### 1. Initial Setup
-Install frontend dependencies:
-```bash
-make frontend-install
-```
-
-### 2. Static SPA Mode (WASM)
-Compiles Go business logic to WebAssembly and builds the frontend for static hosting (e.g., GitHub Pages).
-```bash
-make wasm
-```
-
-### 3. Single-Binary Server Mode
-Builds a standalone binary that includes both the Go server and the embedded frontend assets.
-```bash
-make server
-./server_bin
-```
-
-## 📂 Project Structure
-
-- `cmd/`: Entry points for build targets (`wasm`, `server`).
-- `internal/logic/`: **The Core.** Shared, platform-agnostic business logic (Pure Go).
-- `internal/bridge/`: Adapters for WASM (`syscall/js`) and Native (`net/http`) environments.
-- `internal/models/`: Shared data structures.
-- `frontend/`: React frontend codebase.
-    - `src/api/`: Abstraction layer that detects environment and routes logic calls.
-
-## 🌉 Architecture
-
-Cerberus Go uses a **Bridge Pattern** to maintain environment independence:
-1. **Logic** is kept pure and unaware of its surroundings.
-2. **Adapters** in the bridge layer handle environment-specific input/output.
-3. The **Frontend API** detects if it's running in a WASM-enabled browser or communicating with a remote server, ensuring a seamless developer experience.
-
----
-For more technical details, refer to [SPEC.md](./SPEC.md).
+*   **언어:** Go 1.21+ / TypeScript
+*   **이형(Isomorphic) 백엔드 로직:** 공통 비즈니스 연산 함수와 데이터 모델링은 순수 Go 언어(`internal/logic/`)로 작성되어 프론트엔드와 서버 환경에서 100% 동일하게 공유됩니다.
+*   **프론트엔드:** Vite + React (pnpm workspaces 모노레포 구조 채택).
+*   **배포 환경:** 
+    *   **Phase 1:** WASM으로 컴파일된 비즈니스 로직과 Mock Service Worker(MSW)를 사용한 브라우저 단독 구동 (GitHub Pages 정적 배포).
+    *   **Phase 2 & 3:** `net/http` Go 서버와 SQLite 연동, `go:embed`를 활용한 단일 바이너리(Standalone Binary) 생성 및 Docker 기반 온프레미스 배포.

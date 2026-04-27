@@ -1,8 +1,8 @@
 package main
 
 import (
-	"cerberus-go/internal/logic"
-	"cerberus-go/internal/repository/sqlite"
+	 "cerberus-procure/internal/logic"
+	 "cerberus-procure/internal/repository/sqlite"
 	"embed"
 	"encoding/json"
 	"fmt"

@@ -1,4 +1,4 @@
-module cerberus-go
+module cerberus-procure
 
 go 1.25.0
 

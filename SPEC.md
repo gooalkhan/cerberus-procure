@@ -1,7 +1,7 @@
-# Cerberus Go Project Specification
+# Cerberus Procurement Project Specification
 
 ## 1. Overview
-**Cerberus Go** is an isomorphic Go project designed to share business logic across multiple distribution targets. The goal is to write the core logic once in Go and deploy it as a static web application and a standalone web server.
+**Cerberus Procurement** is an isomorphic Go project designed to manage complex logistics and landing costs in import procurement. 
 
 ## 2. Core Concept: Isomorphic Go
 The project leverages Go's versatility to run in different environments:

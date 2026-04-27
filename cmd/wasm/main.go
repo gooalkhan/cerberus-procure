@@ -1,8 +1,8 @@
 package main
 
 import (
-	"cerberus-go/internal/logic"
-	"cerberus-go/internal/repository/memory"
+	 "cerberus-procure/internal/logic"
+	 "cerberus-procure/internal/repository/memory"
 	"encoding/json"
 	"syscall/js"
 )

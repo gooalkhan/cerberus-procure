@@ -1,8 +1,8 @@
 package logic
 
 import (
-	"cerberus-go/internal/models"
-	"cerberus-go/internal/repository"
+	 "cerberus-procure/internal/models"
+	 "cerberus-procure/internal/repository"
 )
 
 type TodoUseCase struct {

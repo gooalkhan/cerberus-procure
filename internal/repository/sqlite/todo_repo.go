@@ -1,7 +1,7 @@
 package sqlite
 
 import (
-	"cerberus-go/internal/models"
+	 "cerberus-procure/internal/models"
 	"database/sql"
 	"github.com/google/uuid"
 

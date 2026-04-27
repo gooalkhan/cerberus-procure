@@ -1,7 +1,7 @@
 package memory
 
 import (
-	"cerberus-go/internal/models"
+	 "cerberus-procure/internal/models"
 	"errors"
 	"fmt"
 	"time"
