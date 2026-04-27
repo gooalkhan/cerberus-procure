@@ -60,3 +60,16 @@ The Go side will also use interfaces to ensure `internal/logic` remains platform
 ## 7. Build & Deployment Pipeline
 - **make wasm**: Compiles Go to WASM and builds the frontend for static hosting.
 - **make server**: Compiles the Go server with embedded frontend assets.
+
+## 8. Authentication
+The project implements session-based authentication to manage user access.
+
+- **Mechanism**: Standard HTTP sessions using cookies.
+- **WASM Mode**: Since WASM runs entirely in the browser, session management is handled by the browser's local storage or a mock session provider to simulate authenticated states.
+- **Server Mode**: The Go server manages sessions using a secure cookie-based approach (e.g., using a session store in SQLite).
+- **Security**: Passwords are never stored in plain text; they are hashed using bcrypt or a similar secure algorithm.
+- **Flow**:
+    1. User submits credentials.
+    2. Server validates credentials against the database.
+    3. Server creates a session and returns a session ID in a secure, HTTP-only cookie.
+    4. Subsequent requests include the cookie for authentication.

@@ -14,6 +14,32 @@ import (
 var frontendAssets embed.FS
 
 var todoUC *logic.TodoUseCase
+var authUC *logic.AuthUseCase
+
+func loginHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	var input struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	user, err := authUC.Login(input.Username, input.Password)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(user)
+}
 
 func getTodosHandler(w http.ResponseWriter, r *http.Request) {
 	todos, err := todoUC.GetTodos()
@@ -74,15 +100,25 @@ func corsMiddleware(next http.HandlerFunc) http.HandlerFunc {
 }
 
 func main() {
-	repo, err := sqlite.NewSQLiteTodoRepository("todos.db")
+	todoRepo, err := sqlite.NewSQLiteTodoRepository("todos.db")
 	if err != nil {
 		panic(err)
 	}
-	todoUC = logic.NewTodoUseCase(repo)
+	userRepo, err := sqlite.NewSQLiteUserRepository(todoRepo.DB())
+	if err != nil {
+		panic(err)
+	}
+
+	todoUC = logic.NewTodoUseCase(todoRepo)
+	authUC = logic.NewAuthUseCase(userRepo)
+
+	// Seed admin user if not exists
+	authUC.Register("admin", "1234", "Administrator")
 
 	mux := http.NewServeMux()
 
 	// API 핸들러
+	mux.HandleFunc("/api/login", corsMiddleware(loginHandler))
 	mux.HandleFunc("/api/todos", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:

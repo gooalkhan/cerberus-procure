@@ -8,3 +8,8 @@ type TodoRepository interface {
 	ToggleTodo(id string) error
 	DeleteTodo(id string) error
 }
+
+type UserRepository interface {
+	GetUserByUsername(username string) (*models.User, error)
+	CreateUser(user *models.User) error
+}

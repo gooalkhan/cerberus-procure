@@ -8,6 +8,30 @@ import (
 )
 
 var todoUC *logic.TodoUseCase
+var authUC *logic.AuthUseCase
+
+func login(this js.Value, args []js.Value) interface{} {
+	username := args[0].String()
+	password := args[1].String()
+	handler := js.FuncOf(func(this js.Value, promiseArgs []js.Value) interface{} {
+		resolve := promiseArgs[0]
+		reject := promiseArgs[1]
+
+		go func() {
+			user, err := authUC.Login(username, password)
+			if err != nil {
+				reject.Invoke(err.Error())
+				return
+			}
+			b, _ := json.Marshal(user)
+			resolve.Invoke(string(b))
+		}()
+		return nil
+	})
+
+	promiseClass := js.Global().Get("Promise")
+	return promiseClass.New(handler)
+}
 
 func getTodos(this js.Value, args []js.Value) interface{} {
 	handler := js.FuncOf(func(this js.Value, promiseArgs []js.Value) interface{} {
@@ -70,9 +94,16 @@ func deleteTodo(this js.Value, args []js.Value) interface{} {
 }
 
 func main() {
-	repo := memory.NewMemoryTodoRepository()
-	todoUC = logic.NewTodoUseCase(repo)
+	todoRepo := memory.NewMemoryTodoRepository()
+	userRepo := memory.NewMemoryUserRepository()
+	
+	todoUC = logic.NewTodoUseCase(todoRepo)
+	authUC = logic.NewAuthUseCase(userRepo)
 
+	// Seed admin user
+	authUC.Register("admin", "1234", "Administrator")
+
+	js.Global().Set("login", js.FuncOf(login))
 	js.Global().Set("getTodos", js.FuncOf(getTodos))
 	js.Global().Set("addTodo", js.FuncOf(addTodo))
 	js.Global().Set("toggleTodo", js.FuncOf(toggleTodo))

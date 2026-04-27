@@ -30,6 +30,10 @@ func NewSQLiteTodoRepository(dbPath string) (*SQLiteTodoRepository, error) {
 	return &SQLiteTodoRepository{db: db}, nil
 }
 
+func (r *SQLiteTodoRepository) DB() *sql.DB {
+	return r.db
+}
+
 func (r *SQLiteTodoRepository) GetTodos() ([]models.Todo, error) {
 	rows, err := r.db.Query("SELECT id, title, completed FROM todos")
 	if err != nil {

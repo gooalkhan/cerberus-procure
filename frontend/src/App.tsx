@@ -1,14 +1,24 @@
 import { useState, useEffect } from 'react'
 import { getTodos, addTodo, toggleTodo, deleteTodo, Todo } from './api/todoApi'
+import { User } from './api/authApi'
+import Login from './components/Login'
 
 function App() {
+  const [user, setUser] = useState<User | null>(null)
   const [todos, setTodos] = useState<Todo[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    loadTodos()
+    // Check if user is already logged in (could use localStorage or a checkAuth API)
+    setLoading(false)
   }, [])
+
+  useEffect(() => {
+    if (user) {
+      loadTodos()
+    }
+  }, [user])
 
   const loadTodos = async () => {
     try {
@@ -16,8 +26,6 @@ function App() {
       setTodos(data || [])
     } catch (e) {
       console.error(e)
-    } finally {
-      setLoading(false)
     }
   }
 
@@ -38,11 +46,27 @@ function App() {
     loadTodos()
   }
 
+  const handleLogout = () => {
+    setUser(null)
+    setTodos([])
+  }
+
   if (loading) return <div className="loading">Loading...</div>
+
+  if (!user) {
+    return <Login onLogin={setUser} />
+  }
 
   return (
     <div className="container">
-      <h1>Cerberus Go Todo</h1>
+      <header>
+        <h1>Cerberus Go Todo</h1>
+        <div>
+          <span>Welcome, {user.display_name}</span>
+          <button className="logout-btn" onClick={handleLogout}>Logout</button>
+        </div>
+      </header>
+      
       <div className="input-group">
         <input 
           value={input} 
