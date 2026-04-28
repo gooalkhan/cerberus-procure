@@ -2,6 +2,7 @@ package main
 
 import (
 	 "cerberus-procure/internal/logic"
+	 "cerberus-procure/internal/models"
 	 "cerberus-procure/internal/repository/sqlite"
 	"embed"
 	"encoding/json"
@@ -15,6 +16,7 @@ var frontendAssets embed.FS
 
 var todoUC *logic.TodoUseCase
 var authUC *logic.AuthUseCase
+var procureUC *logic.ProcurementUseCase
 
 func loginHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -108,9 +110,14 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+	procureRepo, err := sqlite.NewSQLiteProcurementRepository(todoRepo.DB())
+	if err != nil {
+		panic(err)
+	}
 
 	todoUC = logic.NewTodoUseCase(todoRepo)
 	authUC = logic.NewAuthUseCase(userRepo)
+	procureUC = logic.NewProcurementUseCase(procureRepo)
 
 	// Seed admin user if not exists
 	authUC.Register("admin", "1234", "Administrator")
@@ -119,6 +126,62 @@ func main() {
 
 	// API 핸들러
 	mux.HandleFunc("/api/login", corsMiddleware(loginHandler))
+	
+	// Items API
+	mux.HandleFunc("/api/items", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			items, _ := procureUC.GetItems()
+			json.NewEncoder(w).Encode(items)
+		} else if r.Method == http.MethodPost {
+			var i models.ItemMaster
+			json.NewDecoder(r.Body).Decode(&i)
+			procureUC.SaveItem(&i)
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+
+	// Vendors API
+	mux.HandleFunc("/api/vendors", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			list, _ := procureUC.GetVendors()
+			json.NewEncoder(w).Encode(list)
+		} else if r.Method == http.MethodPost {
+			var i models.VendorMaster
+			json.NewDecoder(r.Body).Decode(&i)
+			procureUC.SaveVendor(&i)
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+
+	// PO API
+	mux.HandleFunc("/api/pos", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			list, _ := procureUC.GetPurchaseOrders()
+			json.NewEncoder(w).Encode(list)
+		} else if r.Method == http.MethodPost {
+			var i models.PurchaseOrder
+			json.NewDecoder(r.Body).Decode(&i)
+			procureUC.SavePurchaseOrder(&i)
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+
+	// PO Items API
+	mux.HandleFunc("/api/pos/items", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			poIDStr := r.URL.Query().Get("poId")
+			var poID int
+			fmt.Sscanf(poIDStr, "%d", &poID)
+			list, _ := procureUC.GetPOItemsByPOID(poID)
+			json.NewEncoder(w).Encode(list)
+		} else if r.Method == http.MethodPost {
+			var i models.POItem
+			json.NewDecoder(r.Body).Decode(&i)
+			procureUC.SavePOItem(&i)
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+
 	mux.HandleFunc("/api/todos", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:

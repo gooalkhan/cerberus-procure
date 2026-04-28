@@ -4,6 +4,7 @@ frontend/dist/
 frontend/public/main.wasm
 frontend/public/wasm_exec.js
 cmd/server/dist/
+*.exe
 
 # Database
 *.db
