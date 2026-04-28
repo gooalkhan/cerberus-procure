@@ -32,6 +32,7 @@ declare global {
       getGoodsReceipts: () => Promise<string>;
       saveGoodsReceipt: (json: string) => Promise<void>;
       getInventoryLots: () => Promise<string>;
+      getInventoryLotsByGRID: (grId: number) => Promise<string>;
       saveInventoryLot: (json: string) => Promise<void>;
       getCostAllocations: () => Promise<string>;
       saveCostAllocation: (json: string) => Promise<void>;

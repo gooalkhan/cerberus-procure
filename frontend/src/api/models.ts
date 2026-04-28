@@ -29,6 +29,7 @@ export interface PurchaseOrder {
   total_amount: number;
   status: string;
   uuid: string;
+  remark: string;
   items?: POItem[];
 }
 
@@ -51,6 +52,7 @@ export interface CommercialInvoice {
   total_amount: number;
   status: string;
   uuid: string;
+  remark: string;
 }
 
 export interface CIAggregatedItem {
@@ -76,6 +78,7 @@ export interface AccountPayable {
   date_of_payment?: string;
   status: string;
   uuid: string;
+  remark: string;
 }
 
 export interface Container {
@@ -102,6 +105,7 @@ export interface ContainerItem {
   gross_weight: number;
   net_weight: number;
   cbm: number;
+  remark: string;
 }
 
 export interface BL {
@@ -178,4 +182,8 @@ export interface BookingView {
   load_qty: number;
   unit_price: number;
   currency: string;
+  gross_weight: number;
+  net_weight: number;
+  cbm: number;
+  remark: string;
 }
