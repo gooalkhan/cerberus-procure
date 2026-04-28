@@ -106,6 +106,8 @@ func migrateProcurement(db *sql.DB) error {
 			Reference_UUID TEXT,
 			Reference_Type TEXT,
 			Due_Date DATETIME,
+			Date_of_Payment DATETIME,
+			Status TEXT CHECK (Status IN ('paid', 'unpaid')) DEFAULT 'unpaid',
 			Allocation_Status TEXT CHECK (Allocation_Status IN ('Draft', 'Open', 'Closed')),
 			Remark TEXT,
 			Created_By TEXT,
@@ -138,6 +140,7 @@ func migrateProcurement(db *sql.DB) error {
 			Gross_Weight REAL,
 			Net_Weight REAL,
 			Cbm REAL,
+			Remark TEXT,
 			FOREIGN KEY (PO_Item_ID) REFERENCES PO_Item(PO_Item_ID),
 			FOREIGN KEY (Container_ID) REFERENCES Container(Container_ID),
 			FOREIGN KEY (CI_ID) REFERENCES Commercial_Invoice(CI_ID),
@@ -379,7 +382,7 @@ func (r *SQLiteProcurementRepository) SaveVendor(v *models.VendorMaster) error {
 
 // Purchase Order
 func (r *SQLiteProcurementRepository) GetPurchaseOrders() ([]models.PurchaseOrder, error) {
-	rows, err := r.db.Query("SELECT PO_ID, PO_Date, PO_No, Vendor_ID, Currency, Total_Amount, Status, Due_Date, Remark, Created_By, Created_At, Updated_By, Updated_At, UUID FROM Purchase_Order")
+	rows, err := r.db.Query("SELECT PO_ID, PO_Date, PO_No, Vendor_ID, Currency, Total_Amount, Status, Remark, Created_By, Created_At, Updated_By, Updated_At, UUID FROM Purchase_Order")
 	if err != nil {
 		return nil, err
 	}
@@ -476,10 +479,11 @@ func (r *SQLiteProcurementRepository) GetCommercialInvoices() ([]models.Commerci
 }
 
 func (r *SQLiteProcurementRepository) GetCIAggregatedItems(ciID int) ([]models.CIAggregatedItem, error) {
-	query := `SELECT Item_ID, SUM(Load_Qty), SUM(Load_Qty * Unit_Price), Currency
-	          FROM Container_Item
-	          WHERE CI_ID = ?
-	          GROUP BY Item_ID, Currency`
+	query := `SELECT ci.Item_ID, im.Name, SUM(ci.Load_Qty), SUM(ci.Load_Qty * ci.Unit_Price), ci.Currency
+	          FROM Container_Item ci
+	          LEFT JOIN Item_Master im ON ci.Item_ID = im.Item_ID
+	          WHERE ci.CI_ID = ?
+	          GROUP BY ci.Item_ID, im.Name, ci.Currency`
 	rows, err := r.db.Query(query, ciID)
 	if err != nil {
 		return nil, err
@@ -489,7 +493,7 @@ func (r *SQLiteProcurementRepository) GetCIAggregatedItems(ciID int) ([]models.C
 	list := []models.CIAggregatedItem{}
 	for rows.Next() {
 		var i models.CIAggregatedItem
-		if err := rows.Scan(&i.ItemID, &i.TotalQty, &i.Amount, &i.Currency); err != nil {
+		if err := rows.Scan(&i.ItemID, &i.ItemName, &i.TotalQty, &i.Amount, &i.Currency); err != nil {
 			return nil, err
 		}
 		list = append(list, i)
@@ -515,7 +519,7 @@ func (r *SQLiteProcurementRepository) SaveCommercialInvoice(i *models.Commercial
 
 // Account Payable
 func (r *SQLiteProcurementRepository) GetAccountPayables() ([]models.AccountPayable, error) {
-	rows, err := r.db.Query("SELECT AP_ID, Vendor_ID, AP_No, Amount, Currency, Local_Amount, Allocation_Type, Reference_UUID, Reference_Type, Due_Date, Allocation_Status, Remark, Created_By, Created_At, Updated_By, Updated_At, UUID FROM Account_Payable")
+	rows, err := r.db.Query("SELECT AP_ID, Vendor_ID, AP_No, Amount, Currency, Local_Amount, Allocation_Type, Reference_UUID, Reference_Type, Due_Date, Date_of_Payment, Status, Allocation_Status, Remark, Created_By, Created_At, Updated_By, Updated_At, UUID FROM Account_Payable")
 	if err != nil {
 		return nil, err
 	}
@@ -523,7 +527,7 @@ func (r *SQLiteProcurementRepository) GetAccountPayables() ([]models.AccountPaya
 	list := []models.AccountPayable{}
 	for rows.Next() {
 		var i models.AccountPayable
-		rows.Scan(&i.ID, &i.VendorID, &i.APNo, &i.Amount, &i.Currency, &i.LocalAmount, &i.AllocationType, &i.ReferenceUUID, &i.ReferenceType, &i.DueDate, &i.AllocationStatus, &i.Remark, &i.CreatedBy, &i.CreatedAt, &i.UpdatedBy, &i.UpdatedAt, &i.UUID)
+		rows.Scan(&i.ID, &i.VendorID, &i.APNo, &i.Amount, &i.Currency, &i.LocalAmount, &i.AllocationType, &i.ReferenceUUID, &i.ReferenceType, &i.DueDate, &i.DateOfPayment, &i.Status, &i.AllocationStatus, &i.Remark, &i.CreatedBy, &i.CreatedAt, &i.UpdatedBy, &i.UpdatedAt, &i.UUID)
 		list = append(list, i)
 	}
 	return list, nil
@@ -531,8 +535,8 @@ func (r *SQLiteProcurementRepository) GetAccountPayables() ([]models.AccountPaya
 
 func (r *SQLiteProcurementRepository) SaveAccountPayable(i *models.AccountPayable) error {
 	if i.ID == 0 {
-		res, err := r.db.Exec("INSERT INTO Account_Payable (Vendor_ID, AP_No, Amount, Currency, Local_Amount, Allocation_Type, Reference_UUID, Reference_Type, Due_Date, Allocation_Status, Remark, Created_By, UUID) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-			i.VendorID, i.APNo, i.Amount, i.Currency, i.LocalAmount, i.AllocationType, i.ReferenceUUID, i.ReferenceType, i.DueDate, i.AllocationStatus, i.Remark, i.CreatedBy, i.UUID)
+		res, err := r.db.Exec("INSERT INTO Account_Payable (Vendor_ID, AP_No, Amount, Currency, Local_Amount, Allocation_Type, Reference_UUID, Reference_Type, Due_Date, Date_of_Payment, Status, Allocation_Status, Remark, Created_By, UUID) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+			i.VendorID, i.APNo, i.Amount, i.Currency, i.LocalAmount, i.AllocationType, i.ReferenceUUID, i.ReferenceType, i.DueDate, i.DateOfPayment, i.Status, i.AllocationStatus, i.Remark, i.CreatedBy, i.UUID)
 		if err != nil {
 			return err
 		}
@@ -540,8 +544,8 @@ func (r *SQLiteProcurementRepository) SaveAccountPayable(i *models.AccountPayabl
 		i.ID = int(id)
 		return nil
 	}
-	_, err := r.db.Exec("UPDATE Account_Payable SET Vendor_ID=?, AP_No=?, Amount=?, Currency=?, Local_Amount=?, Allocation_Type=?, Reference_UUID=?, Reference_Type=?, Due_Date=?, Allocation_Status=?, Remark=?, Updated_By=?, Updated_At=CURRENT_TIMESTAMP WHERE AP_ID=?",
-		i.VendorID, i.APNo, i.Amount, i.Currency, i.LocalAmount, i.AllocationType, i.ReferenceUUID, i.ReferenceType, i.DueDate, i.AllocationStatus, i.Remark, i.UpdatedBy, i.ID)
+	_, err := r.db.Exec("UPDATE Account_Payable SET Vendor_ID=?, AP_No=?, Amount=?, Currency=?, Local_Amount=?, Allocation_Type=?, Reference_UUID=?, Reference_Type=?, Due_Date=?, Date_of_Payment=?, Status=?, Allocation_Status=?, Remark=?, Updated_By=?, Updated_At=CURRENT_TIMESTAMP WHERE AP_ID=?",
+		i.VendorID, i.APNo, i.Amount, i.Currency, i.LocalAmount, i.AllocationType, i.ReferenceUUID, i.ReferenceType, i.DueDate, i.DateOfPayment, i.Status, i.AllocationStatus, i.Remark, i.UpdatedBy, i.ID)
 	return err
 }
 
@@ -654,6 +658,25 @@ func (r *SQLiteProcurementRepository) GetInventoryLots() ([]models.InventoryLot,
 	return list, nil
 }
 
+func (r *SQLiteProcurementRepository) GetInventoryLotsByGRID(grID int) ([]models.InventoryLot, error) {
+	rows, err := r.db.Query("SELECT Lot_ID, GR_ID, Container_Item_ID, Lot_No, Expiry_Date, Qty, Landed_Cost_Per_Unit, Quarantine_Status, Remark, UUID FROM Inventory_Lot WHERE GR_ID = ?", grID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	list := []models.InventoryLot{}
+	for rows.Next() {
+		var i models.InventoryLot
+		var expiryStr *string
+		rows.Scan(&i.ID, &i.GRID, &i.ContainerItemID, &i.LotNo, &expiryStr, &i.Qty, &i.LandedCostPerUnit, &i.QuarantineStatus, &i.Remark, &i.UUID)
+		if expiryStr != nil {
+			i.ExpiryDate, _ = time.Parse("2006-01-02", *expiryStr)
+		}
+		list = append(list, i)
+	}
+	return list, nil
+}
+
 func (r *SQLiteProcurementRepository) SaveInventoryLot(i *models.InventoryLot) error {
 	if i.ID == 0 {
 		res, err := r.db.Exec("INSERT INTO Inventory_Lot (GR_ID, Container_Item_ID, Lot_No, Expiry_Date, Qty, Landed_Cost_Per_Unit, Quarantine_Status, Quarantine_Remark, Remark, UUID) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -719,18 +742,14 @@ func (r *SQLiteProcurementRepository) GetContainerItemsByContainerID(containerID
 }
 
 func (r *SQLiteProcurementRepository) SaveContainerItem(i *models.ContainerItem) error {
+	var err error
 	if i.ID == 0 {
-		res, err := r.db.Exec("INSERT INTO Container_Item (PO_Item_ID, Container_ID, CI_ID, BL_ID, Item_ID, Unit_Price, Currency, Load_Qty, Gross_Weight, Net_Weight, Cbm) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-			i.POItemID, i.ContainerID, i.CIID, i.BLID, i.ItemID, i.UnitPrice, i.Currency, i.LoadQty, i.GrossWeight, i.NetWeight, i.CBM)
-		if err != nil {
-			return err
-		}
-		id, _ := res.LastInsertId()
-		i.ID = int(id)
-		return nil
+		_, err = r.db.Exec(`INSERT INTO Container_Item (PO_Item_ID, Container_ID, CI_ID, BL_ID, Item_ID, Unit_Price, Currency, Load_Qty, Gross_Weight, Net_Weight, Cbm, Remark) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			i.POItemID, i.ContainerID, i.CIID, i.BLID, i.ItemID, i.UnitPrice, i.Currency, i.LoadQty, i.GrossWeight, i.NetWeight, i.CBM, i.Remark)
+	} else {
+		_, err = r.db.Exec(`UPDATE Container_Item SET PO_Item_ID=?, Container_ID=?, CI_ID=?, BL_ID=?, Item_ID=?, Unit_Price=?, Currency=?, Load_Qty=?, Gross_Weight=?, Net_Weight=?, Cbm=?, Remark=? WHERE Container_Item_ID=?`,
+			i.POItemID, i.ContainerID, i.CIID, i.BLID, i.ItemID, i.UnitPrice, i.Currency, i.LoadQty, i.GrossWeight, i.NetWeight, i.CBM, i.Remark, i.ID)
 	}
-	_, err := r.db.Exec("UPDATE Container_Item SET PO_Item_ID=?, Container_ID=?, CI_ID=?, BL_ID=?, Item_ID=?, Unit_Price=?, Currency=?, Load_Qty=?, Gross_Weight=?, Net_Weight=?, Cbm=? WHERE Container_Item_ID=?",
-		i.POItemID, i.ContainerID, i.CIID, i.BLID, i.ItemID, i.UnitPrice, i.Currency, i.LoadQty, i.GrossWeight, i.NetWeight, i.CBM, i.ID)
 	return err
 }
 
@@ -809,16 +828,19 @@ func (r *SQLiteProcurementRepository) GetBookings() ([]models.BookingView, error
 			b.Vessel_Name,
 			ci.PO_Item_ID,
 			ci.Item_ID,
+			im.Name as Item_Name,
 			ci.CI_ID,
 			ci.Load_Qty,
 			ci.Unit_Price,
 			ci.Currency,
 			ci.Gross_Weight,
 			ci.Net_Weight,
-			ci.Cbm
+			ci.Cbm,
+			ci.Remark
 		FROM Container_Item ci
 		LEFT JOIN Container c ON ci.Container_ID = c.Container_ID
 		LEFT JOIN BL b ON ci.BL_ID = b.BL_ID
+		LEFT JOIN Item_Master im ON ci.Item_ID = im.Item_ID
 		ORDER BY 
 			CASE c.Status 
 				WHEN 'Loaded' THEN 1 
@@ -843,8 +865,8 @@ func (r *SQLiteProcurementRepository) GetBookings() ([]models.BookingView, error
 			&b.TotalCBM, &b.TotalNetWgt, &b.TotalGrossWgt,
 			&b.BLID, &b.BLNo, &b.BLStatus, &b.ETD, &b.ETA,
 			&b.POL, &b.POD, &b.Carrier, &b.VesselName,
-			&b.POItemID, &b.ItemID, &b.CIID, &b.LoadQty, &b.UnitPrice, &b.Currency,
-			&b.GrossWeight, &b.NetWeight, &b.CBM,
+			&b.POItemID, &b.ItemID, &b.ItemName, &b.CIID, &b.LoadQty, &b.UnitPrice, &b.Currency,
+			&b.GrossWeight, &b.NetWeight, &b.CBM, &b.Remark,
 		)
 		if err != nil {
 			return nil, err

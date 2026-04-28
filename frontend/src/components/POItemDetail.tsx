@@ -81,6 +81,7 @@ const POItemDetail: React.FC<POItemDetailProps> = ({ po, onChange }) => {
                 <th>Price</th>
                 <th>Amount</th>
                 <th>Status</th>
+                <th>Remark</th>
                 <th></th>
               </tr>
             </thead>
@@ -127,6 +128,15 @@ const POItemDetail: React.FC<POItemDetailProps> = ({ po, onChange }) => {
                     </select>
                   </td>
                   <td>
+                    <input 
+                      type="text" 
+                      value={item.remark || ''} 
+                      placeholder="Remark..."
+                      style={{ width: '120px', padding: '0.3rem' }}
+                      onChange={(e) => handleItemChange(idx, 'remark', e.target.value)}
+                    />
+                  </td>
+                  <td>
                     <button className="btn-danger secondary" style={{ padding: '0.2rem 0.5rem' }} onClick={() => handleRemoveItem(idx)}>✕</button>
                   </td>
                 </tr>
@@ -137,12 +147,12 @@ const POItemDetail: React.FC<POItemDetailProps> = ({ po, onChange }) => {
                   <td style={{ textAlign: 'right', paddingRight: '1rem', fontWeight: 700, color: 'var(--accent-color)' }}>
                     {items.reduce((acc, i) => acc + (i.po_qty * i.unit_price), 0).toLocaleString()}
                   </td>
-                  <td colSpan={2}></td>
+                  <td colSpan={3}></td>
                 </tr>
               )}
               {items.length === 0 && (
                 <tr>
-                  <td colSpan={6} style={{ textAlign: 'center', padding: '1rem' }}>No items added</td>
+                  <td colSpan={7} style={{ textAlign: 'center', padding: '1rem' }}>No items added</td>
                 </tr>
               )}
             </tbody>

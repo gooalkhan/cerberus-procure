@@ -87,6 +87,7 @@ type CommercialInvoice struct {
 // CIAggregatedItem 상업 송장 품목 집계 정보
 type CIAggregatedItem struct {
 	ItemID   int     `json:"item_id"`
+	ItemName string  `json:"item_name"`
 	TotalQty float64 `json:"total_qty"`
 	Amount   float64 `json:"amount"`
 	Currency string  `json:"currency"`
@@ -104,6 +105,8 @@ type AccountPayable struct {
 	ReferenceUUID    string    `json:"reference_uuid"`
 	ReferenceType    string    `json:"reference_type"` // BL, Container, PO, CI, GR, Lot
 	DueDate          time.Time `json:"due_date"`
+	DateOfPayment    time.Time `json:"date_of_payment"`
+	Status           string    `json:"status"` // paid, unpaid
 	AllocationStatus string    `json:"allocation_status"`
 	Remark           string    `json:"remark"`
 	CreatedBy        string    `json:"created_by"`
@@ -112,6 +115,7 @@ type AccountPayable struct {
 	UpdatedAt        time.Time `json:"updated_at"`
 	UUID             string    `json:"uuid"`
 }
+
 
 // Container 운송 단위 정보
 type Container struct {
@@ -139,6 +143,7 @@ type ContainerItem struct {
 	GrossWeight float64 `json:"gross_weight"`
 	NetWeight   float64 `json:"net_weight"`
 	CBM         float64 `json:"cbm"`
+	Remark      string  `json:"remark"`
 }
 
 // BL 선하증권 정보
@@ -230,6 +235,7 @@ type BookingView struct {
 	VesselName      string    `json:"vessel_name"`
 	POItemID        int       `json:"po_item_id"`
 	ItemID          int       `json:"item_id"`
+	ItemName        string    `json:"item_name"`
 	CIID            int       `json:"ci_id"`
 	LoadQty         float64   `json:"load_qty"`
 	UnitPrice       float64   `json:"unit_price"`
@@ -237,5 +243,6 @@ type BookingView struct {
 	GrossWeight     float64   `json:"gross_weight"`
 	NetWeight       float64   `json:"net_weight"`
 	CBM             float64   `json:"cbm"`
+	Remark          string    `json:"remark"`
 }
 

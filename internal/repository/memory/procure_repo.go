@@ -123,7 +123,11 @@ func (r *MemoryProcurementRepository) seed() {
 	r.containerItems[c2.ID] = append(r.containerItems[c2.ID], ci2)
 
 	// Mock APs
-	ap1 := models.AccountPayable{ID: 1, APNo: "AP-2024-001", VendorID: 1, Amount: 1950.0, Currency: "USD", DueDate: time.Now().AddDate(0, 1, 0), AllocationStatus: "Open", UUID: "ap-uuid-1", CreatedAt: time.Now()}
+	ap1 := models.AccountPayable{
+		ID: 1, APNo: "AP-2024-001", VendorID: 1, Amount: 1950.0, Currency: "USD", 
+		DueDate: time.Now().AddDate(0, 1, 0), DateOfPayment: time.Time{}, 
+		Status: "unpaid", AllocationStatus: "Open", UUID: "ap-uuid-1", CreatedAt: time.Now(),
+	}
 	r.aps[ap1.ID] = ap1
 
 	// Mock Goods Receipts
@@ -308,12 +312,17 @@ func (r *MemoryProcurementRepository) GetCIAggregatedItems(ciID int) ([]models.C
 	for _, items := range r.containerItems {
 		for _, ci := range items {
 			if ci.CIID == ciID {
+				itemName := ""
+				if m, ok := r.items[ci.ItemID]; ok {
+					itemName = m.Name
+				}
 				if agg, ok := aggregates[ci.ItemID]; ok {
 					agg.TotalQty += ci.LoadQty
 					agg.Amount += ci.LoadQty * ci.UnitPrice
 				} else {
 					aggregates[ci.ItemID] = &models.CIAggregatedItem{
 						ItemID:   ci.ItemID,
+						ItemName: itemName,
 						TotalQty: ci.LoadQty,
 						Amount:   ci.LoadQty * ci.UnitPrice,
 						Currency: ci.Currency,
@@ -433,6 +442,18 @@ func (r *MemoryProcurementRepository) GetInventoryLots() ([]models.InventoryLot,
 	list := make([]models.InventoryLot, 0, len(r.lots))
 	for _, i := range r.lots {
 		list = append(list, i)
+	}
+	return list, nil
+}
+
+func (r *MemoryProcurementRepository) GetInventoryLotsByGRID(grID int) ([]models.InventoryLot, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	list := []models.InventoryLot{}
+	for _, lot := range r.lots {
+		if lot.GRID == grID {
+			list = append(list, lot)
+		}
 	}
 	return list, nil
 }
@@ -609,6 +630,10 @@ func (r *MemoryProcurementRepository) GetBookings() ([]models.BookingView, error
 		container := r.containers[cID]
 		for _, ci := range items {
 			bl := r.bls[ci.BLID]
+			itemName := ""
+			if m, ok := r.items[ci.ItemID]; ok {
+				itemName = m.Name
+			}
 			list = append(list, models.BookingView{
 				ContainerItemID: ci.ID,
 				ContainerID:     ci.ContainerID,
@@ -628,6 +653,7 @@ func (r *MemoryProcurementRepository) GetBookings() ([]models.BookingView, error
 				VesselName:      bl.VesselName,
 				POItemID:        ci.POItemID,
 				ItemID:          ci.ItemID,
+				ItemName:        itemName,
 				CIID:            ci.CIID,
 				LoadQty:         ci.LoadQty,
 				UnitPrice:       ci.UnitPrice,
@@ -635,6 +661,7 @@ func (r *MemoryProcurementRepository) GetBookings() ([]models.BookingView, error
 				GrossWeight:     ci.GrossWeight,
 				NetWeight:       ci.NetWeight,
 				CBM:             ci.CBM,
+				Remark:          ci.Remark,
 			})
 		}
 	}

@@ -56,6 +56,7 @@ type ProcurementRepository interface {
 	GetGoodsReceipts() ([]models.GoodsReceipt, error)
 	SaveGoodsReceipt(gr *models.GoodsReceipt) error
 	GetInventoryLots() ([]models.InventoryLot, error)
+	GetInventoryLotsByGRID(grID int) ([]models.InventoryLot, error)
 	SaveInventoryLot(lot *models.InventoryLot) error
 
 	// Container Items

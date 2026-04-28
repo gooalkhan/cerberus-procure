@@ -158,6 +158,10 @@ export const procureApi = {
     if (isWasm()) return JSON.parse(await window.procureApi.getGoodsReceipts());
     return request<GoodsReceipt[]>('/grs');
   },
+  getInventoryLotsByGRID: async (grId: number): Promise<InventoryLot[]> => {
+    if (isWasm()) return JSON.parse(await window.procureApi.getInventoryLotsByGRID(grId));
+    return request<InventoryLot[]>(`/lots/gr?grId=${grId}`);
+  },
   saveGoodsReceipt: async (i: GoodsReceipt): Promise<void> => {
     if (isWasm()) return window.procureApi.saveGoodsReceipt(JSON.stringify(i));
     return request('/grs', 'POST', i);

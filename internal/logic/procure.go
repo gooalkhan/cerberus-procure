@@ -145,6 +145,10 @@ func (uc *ProcurementUseCase) GetInventoryLots() ([]models.InventoryLot, error) 
 	return uc.repo.GetInventoryLots()
 }
 
+func (uc *ProcurementUseCase) GetInventoryLotsByGRID(grID int) ([]models.InventoryLot, error) {
+	return uc.repo.GetInventoryLotsByGRID(grID)
+}
+
 func (uc *ProcurementUseCase) SaveInventoryLot(lot *models.InventoryLot) error {
 	if lot.UUID == "" {
 		lot.UUID = uuid.New().String()

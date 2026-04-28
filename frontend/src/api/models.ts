@@ -55,6 +55,7 @@ export interface CommercialInvoice {
 
 export interface CIAggregatedItem {
   item_id: number;
+  item_name: string;
   total_qty: number;
   amount: number;
   currency: string;
@@ -72,6 +73,8 @@ export interface AccountPayable {
   reference_type: string;
   allocation_status: string;
   due_date: string;
+  date_of_payment?: string;
+  status: string;
   uuid: string;
 }
 
@@ -169,6 +172,8 @@ export interface BookingView {
   carrier: string;
   vessel_name: string;
   po_item_id: number;
+  item_id: number;
+  item_name: string;
   ci_id: number;
   load_qty: number;
   unit_price: number;

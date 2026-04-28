@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import SearchModal from './SearchModal';
 
 export interface Column {
   key: string;
@@ -8,6 +9,9 @@ export interface Column {
   filterOptions?: string[];
   formHidden?: boolean;
   tableHidden?: boolean;
+  fullWidth?: boolean;
+  searchType?: string;
+  divider?: boolean;
 }
 
 interface CrudPageProps<T> {
@@ -25,6 +29,8 @@ function CrudPage<T extends { [key: string]: any }>({ title, columns, fetchData,
   const [filters, setFilters] = useState<{ [key: string]: any }>({});
   const [selectedItem, setSelectedItem] = useState<T | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [sortConfig, setSortConfig] = useState<{ key: string, direction: 'asc' | 'desc' } | null>(null);
+  const [searchConfig, setSearchConfig] = useState<{ type: string, field: string } | null>(null);
 
   useEffect(() => {
     loadData();
@@ -36,8 +42,18 @@ function CrudPage<T extends { [key: string]: any }>({ title, columns, fetchData,
     setFilteredData(res);
   };
 
+  const handleSort = (key: string) => {
+    let direction: 'asc' | 'desc' = 'asc';
+    if (sortConfig && sortConfig.key === key && sortConfig.direction === 'asc') {
+      direction = 'desc';
+    }
+    setSortConfig({ key, direction });
+  };
+
   useEffect(() => {
-    let result = data;
+    let result = [...data];
+    
+    // Apply filters
     Object.keys(filters).forEach(key => {
       const val = filters[key];
       if (!val) return;
@@ -54,8 +70,25 @@ function CrudPage<T extends { [key: string]: any }>({ title, columns, fetchData,
         );
       }
     });
+
+    // Apply sorting
+    if (sortConfig) {
+      result.sort((a, b) => {
+        let aVal = a[sortConfig.key];
+        let bVal = b[sortConfig.key];
+        
+        // Handle nulls
+        if (aVal === null || aVal === undefined) return 1;
+        if (bVal === null || bVal === undefined) return -1;
+
+        if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
+        if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1;
+        return 0;
+      });
+    }
+
     setFilteredData(result);
-  }, [filters, data]);
+  }, [filters, data, sortConfig]);
 
   const handleRowClick = (item: T) => {
     setSelectedItem({ ...item });
@@ -150,7 +183,19 @@ function CrudPage<T extends { [key: string]: any }>({ title, columns, fetchData,
             <tr>
               {columns.map(col => {
                 if (col.tableHidden) return null;
-                return <th key={col.key}>{col.label}</th>;
+                const isSorted = sortConfig?.key === col.key;
+                return (
+                  <th 
+                    key={col.key} 
+                    onClick={() => handleSort(col.key)}
+                    style={{ cursor: 'pointer', userSelect: 'none', position: 'relative', paddingRight: '20px' }}
+                  >
+                    {col.label}
+                    <span style={{ marginLeft: '4px', opacity: isSorted ? 1 : 0.3, fontSize: '0.8rem' }}>
+                      {isSorted ? (sortConfig.direction === 'asc' ? '↑' : '↓') : '↕'}
+                    </span>
+                  </th>
+                );
               })}
             </tr>
           </thead>
@@ -183,9 +228,31 @@ function CrudPage<T extends { [key: string]: any }>({ title, columns, fetchData,
             <div className="form-grid">
               {columns.map(col => {
                 if (col.formHidden) return null;
+                if (col.divider) {
+                  return <div key={col.key} style={{ gridColumn: 'span 3', borderTop: '1px solid var(--border-color)', margin: '1rem 0', opacity: 0.3 }}></div>;
+                }
                 return (
-                  <div key={col.key} className="form-group">
-                    <label>{col.label}</label>
+                  <div key={col.key} className={`form-group ${col.fullWidth ? 'full-width' : ''}`}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      {col.label}
+                      {col.searchType && (
+                        <span 
+                          style={{ 
+                            fontSize: '0.65rem', 
+                            background: 'var(--accent-color)', 
+                            color: 'white', 
+                            padding: '2px 6px', 
+                            borderRadius: '4px', 
+                            cursor: 'pointer',
+                            textTransform: 'uppercase',
+                            fontWeight: 'bold'
+                          }}
+                          onClick={() => setSearchConfig({ type: col.searchType!, field: col.key })}
+                        >
+                          search
+                        </span>
+                      )}
+                    </label>
                     <input 
                       type={col.type || 'text'}
                       value={col.type === 'date' && selectedItem[col.key] 
@@ -204,6 +271,21 @@ function CrudPage<T extends { [key: string]: any }>({ title, columns, fetchData,
             </div>
           </div>
         </div>
+      )}
+
+      {searchConfig && (
+        <SearchModal 
+          type={searchConfig.type} 
+          searchTerm="" 
+          onClose={() => setSearchConfig(null)} 
+          onSelect={(item) => {
+            const id = item.vendor_id || item.po_id || item.ci_id || item.container_id || item.bl_id || item.id;
+            if (selectedItem) {
+              setSelectedItem({ ...selectedItem, [searchConfig.field]: id });
+            }
+            setSearchConfig(null);
+          }}
+        />
       )}
     </div>
   );

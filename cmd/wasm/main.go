@@ -398,6 +398,18 @@ func main() {
 			return nil
 		}))
 	}))
+	procureObj.Set("getInventoryLotsByGRID", js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		grId := args[0].Int()
+		return js.Global().Get("Promise").New(js.FuncOf(func(this js.Value, pArgs []js.Value) interface{} {
+			resolve := pArgs[0]
+			go func() {
+				list, _ := procureUC.GetInventoryLotsByGRID(grId)
+				b, _ := json.Marshal(list)
+				resolve.Invoke(string(b))
+			}()
+			return nil
+		}))
+	}))
 	procureObj.Set("saveGoodsReceipt", js.FuncOf(func(this js.Value, args []js.Value) interface{} {
 		jsonStr := args[0].String()
 		return js.Global().Get("Promise").New(js.FuncOf(func(this js.Value, pArgs []js.Value) interface{} {
