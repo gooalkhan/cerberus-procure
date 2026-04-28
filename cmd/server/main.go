@@ -127,8 +127,15 @@ func main() {
 	// API 핸들러
 	mux.HandleFunc("/api/login", corsMiddleware(loginHandler))
 	
+	mux.HandleFunc("/api/seed", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			procureUC.SeedData()
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
 	// Items API
 	mux.HandleFunc("/api/items", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
 		if r.Method == http.MethodGet {
 			items, _ := procureUC.GetItems()
 			json.NewEncoder(w).Encode(items)
@@ -142,6 +149,7 @@ func main() {
 
 	// Vendors API
 	mux.HandleFunc("/api/vendors", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
 		if r.Method == http.MethodGet {
 			list, _ := procureUC.GetVendors()
 			json.NewEncoder(w).Encode(list)
@@ -155,6 +163,7 @@ func main() {
 
 	// PO API
 	mux.HandleFunc("/api/pos", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
 		if r.Method == http.MethodGet {
 			list, _ := procureUC.GetPurchaseOrders()
 			json.NewEncoder(w).Encode(list)
@@ -168,6 +177,7 @@ func main() {
 
 	// PO Items API
 	mux.HandleFunc("/api/pos/items", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
 		if r.Method == http.MethodGet {
 			poIDStr := r.URL.Query().Get("poId")
 			var poID int
@@ -182,7 +192,164 @@ func main() {
 		}
 	}))
 
+	// Invoices API
+	mux.HandleFunc("/api/invoices", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet {
+			list, _ := procureUC.GetCommercialInvoices()
+			json.NewEncoder(w).Encode(list)
+		} else if r.Method == http.MethodPost {
+			var i models.CommercialInvoice
+			json.NewDecoder(r.Body).Decode(&i)
+			procureUC.SaveCommercialInvoice(&i)
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+
+	mux.HandleFunc("/api/invoices/items", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet {
+			ciIDStr := r.URL.Query().Get("ciId")
+			var ciID int
+			fmt.Sscanf(ciIDStr, "%d", &ciID)
+			list, _ := procureUC.GetCIAggregatedItems(ciID)
+			json.NewEncoder(w).Encode(list)
+		}
+	}))
+
+	// AP API
+	mux.HandleFunc("/api/aps", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet {
+			list, _ := procureUC.GetAccountPayables()
+			json.NewEncoder(w).Encode(list)
+		} else if r.Method == http.MethodPost {
+			var i models.AccountPayable
+			json.NewDecoder(r.Body).Decode(&i)
+			procureUC.SaveAccountPayable(&i)
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+
+	// Containers API
+	mux.HandleFunc("/api/containers", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet {
+			list, _ := procureUC.GetContainers()
+			json.NewEncoder(w).Encode(list)
+		} else if r.Method == http.MethodPost {
+			var i models.Container
+			json.NewDecoder(r.Body).Decode(&i)
+			procureUC.SaveContainer(&i)
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+
+	mux.HandleFunc("/api/containers/items", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet {
+			cIDStr := r.URL.Query().Get("containerId")
+			var cID int
+			fmt.Sscanf(cIDStr, "%d", &cID)
+			list, _ := procureUC.GetContainerItemsByContainerID(cID)
+			json.NewEncoder(w).Encode(list)
+		} else if r.Method == http.MethodPost {
+			var i models.ContainerItem
+			json.NewDecoder(r.Body).Decode(&i)
+			procureUC.SaveContainerItem(&i)
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+
+	mux.HandleFunc("/api/containers/bl", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet {
+			blIDStr := r.URL.Query().Get("blId")
+			var blID int
+			fmt.Sscanf(blIDStr, "%d", &blID)
+			list, _ := procureUC.GetContainersByBLID(blID)
+			json.NewEncoder(w).Encode(list)
+		}
+	}))
+
+	// BL API
+	mux.HandleFunc("/api/bls", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet {
+			list, _ := procureUC.GetBLs()
+			json.NewEncoder(w).Encode(list)
+		} else if r.Method == http.MethodPost {
+			var i models.BL
+			json.NewDecoder(r.Body).Decode(&i)
+			procureUC.SaveBL(&i)
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+
+	// GR API
+	mux.HandleFunc("/api/grs", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet {
+			list, _ := procureUC.GetGoodsReceipts()
+			json.NewEncoder(w).Encode(list)
+		} else if r.Method == http.MethodPost {
+			var i models.GoodsReceipt
+			json.NewDecoder(r.Body).Decode(&i)
+			procureUC.SaveGoodsReceipt(&i)
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+
+	// Lots API
+	mux.HandleFunc("/api/lots", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet {
+			list, _ := procureUC.GetInventoryLots()
+			json.NewEncoder(w).Encode(list)
+		} else if r.Method == http.MethodPost {
+			var i models.InventoryLot
+			json.NewDecoder(r.Body).Decode(&i)
+			procureUC.SaveInventoryLot(&i)
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+
+	mux.HandleFunc("/api/lots/gr", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet {
+			grIDStr := r.URL.Query().Get("grId")
+			var grID int
+			fmt.Sscanf(grIDStr, "%d", &grID)
+			list, _ := procureUC.GetInventoryLotsByGRID(grID)
+			json.NewEncoder(w).Encode(list)
+		}
+	}))
+
+	// Allocations API
+	mux.HandleFunc("/api/allocations", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet {
+			list, _ := procureUC.GetCostAllocations()
+			json.NewEncoder(w).Encode(list)
+		} else if r.Method == http.MethodPost {
+			var i models.CostAllocation
+			json.NewDecoder(r.Body).Decode(&i)
+			procureUC.SaveCostAllocation(&i)
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+
+	// Bookings API
+	mux.HandleFunc("/api/bookings", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet {
+			list, _ := procureUC.GetBookings()
+			json.NewEncoder(w).Encode(list)
+		}
+	}))
+
 	mux.HandleFunc("/api/todos", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
 		switch r.Method {
 		case http.MethodGet:
 			getTodosHandler(w, r)

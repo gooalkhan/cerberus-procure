@@ -38,8 +38,9 @@ function CrudPage<T extends { [key: string]: any }>({ title, columns, fetchData,
 
   const loadData = async () => {
     const res = await fetchData();
-    setData(res);
-    setFilteredData(res);
+    const list = Array.isArray(res) ? res : [];
+    setData(list);
+    setFilteredData(list);
   };
 
   const handleSort = (key: string) => {

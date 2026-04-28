@@ -50,7 +50,14 @@ async function request<T>(path: string, method: string = 'GET', body?: any): Pro
     body: body ? JSON.stringify(body) : undefined,
   });
   if (!res.ok) throw new Error(await res.text());
-  return res.json();
+  
+  const text = await res.text();
+  if (!text) return null as any;
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    return null as any;
+  }
 }
 
 export const procureApi = {
