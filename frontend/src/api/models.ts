@@ -74,8 +74,8 @@ export interface AccountPayable {
   reference_uuid: string;
   reference_type: string;
   allocation_status: string;
-  due_date: string;
-  date_of_payment?: string;
+  due_date: string | null;
+  date_of_payment?: string | null;
   status: string;
   uuid: string;
   remark: string;
@@ -111,8 +111,8 @@ export interface ContainerItem {
 export interface BL {
   bl_id: number;
   bl_no: string;
-  etd: string;
-  eta: string;
+  etd: string | null;
+  eta: string | null;
   pol: string;
   pod: string;
   carrier: string;
@@ -136,7 +136,7 @@ export interface InventoryLot {
   gr_id: number;
   container_item_id: number;
   lot_no: string;
-  expiry_date?: string;
+  expiry_date?: string | null;
   qty: number;
   landed_cost_per_unit: number;
   quarantine_status: string;
@@ -169,8 +169,8 @@ export interface BookingView {
   bl_id: number;
   bl_no: string;
   bl_status: string;
-  etd: string;
-  eta: string;
+  etd: string | null;
+  eta: string | null;
   pol: string;
   pod: string;
   carrier: string;

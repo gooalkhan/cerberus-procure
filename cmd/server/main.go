@@ -8,8 +8,29 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"log"
 	"net/http"
+	"os"
+	"time"
 )
+
+var apiLogger *log.Logger
+var serverLogger *log.Logger
+
+func initLogger() {
+	if err := os.MkdirAll("log", 0755); err != nil {
+		fmt.Println("Error creating log directory:", err)
+		return
+	}
+	file1, err := os.OpenFile("log/api.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	if err == nil {
+		apiLogger = log.New(file1, "API ", log.Ldate|log.Ltime)
+	}
+	file2, err := os.OpenFile("log/server.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	if err == nil {
+		serverLogger = log.New(file2, "SERVER ", log.Ldate|log.Ltime|log.Lshortfile)
+	}
+}
 
 //go:embed dist/*
 var frontendAssets embed.FS
@@ -88,20 +109,62 @@ func deleteTodoHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+type loggingResponseWriter struct {
+	http.ResponseWriter
+	statusCode int
+	body       []byte
+}
+
+func (lrw *loggingResponseWriter) WriteHeader(code int) {
+	lrw.statusCode = code
+	lrw.ResponseWriter.WriteHeader(code)
+}
+
+func (lrw *loggingResponseWriter) Write(b []byte) (int, error) {
+	if lrw.statusCode == 0 {
+		lrw.statusCode = http.StatusOK
+	}
+	if lrw.statusCode >= 400 && len(lrw.body) < 200 {
+		lrw.body = append(lrw.body, b...)
+	}
+	return lrw.ResponseWriter.Write(b)
+}
+
 func corsMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		start := time.Now()
+		lrw := &loggingResponseWriter{ResponseWriter: w, statusCode: http.StatusOK}
+		
+		lrw.Header().Set("Access-Control-Allow-Origin", "*")
+		lrw.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, DELETE")
+		lrw.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		
 		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusOK)
-			return
+			lrw.WriteHeader(http.StatusOK)
+		} else {
+			next(lrw, r)
 		}
-		next(w, r)
+		
+		if apiLogger != nil {
+			if lrw.statusCode >= 400 {
+				// Clean up the error message for single-line logging
+				errMsg := ""
+				if len(lrw.body) > 0 {
+					errMsg = string(lrw.body)
+					if len(errMsg) > 0 && errMsg[len(errMsg)-1] == '\n' {
+						errMsg = errMsg[:len(errMsg)-1]
+					}
+				}
+				apiLogger.Printf("[%s] %s %s - %d %s - %v - Error: %s", r.RemoteAddr, r.Method, r.URL.Path, lrw.statusCode, http.StatusText(lrw.statusCode), time.Since(start), errMsg)
+			} else {
+				apiLogger.Printf("[%s] %s %s - %d %s - %v", r.RemoteAddr, r.Method, r.URL.Path, lrw.statusCode, http.StatusText(lrw.statusCode), time.Since(start))
+			}
+		}
 	}
 }
 
 func main() {
+	initLogger()
 	todoRepo, err := sqlite.NewSQLiteTodoRepository("todos.db")
 	if err != nil {
 		panic(err)
@@ -137,12 +200,21 @@ func main() {
 	mux.HandleFunc("/api/items", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method == http.MethodGet {
-			items, _ := procureUC.GetItems()
+			items, err := procureUC.GetItems()
+			if err != nil {
+				fmt.Println("GetItems Error:", err)
+			}
 			json.NewEncoder(w).Encode(items)
 		} else if r.Method == http.MethodPost {
 			var i models.ItemMaster
-			json.NewDecoder(r.Body).Decode(&i)
-			procureUC.SaveItem(&i)
+			err := json.NewDecoder(r.Body).Decode(&i)
+			if err != nil {
+				fmt.Println("Decode Error (Items):", err)
+			}
+			err = procureUC.SaveItem(&i)
+			if err != nil {
+				fmt.Println("Save Error (Items):", err)
+			}
 			w.WriteHeader(http.StatusOK)
 		}
 	}))
@@ -225,8 +297,16 @@ func main() {
 			json.NewEncoder(w).Encode(list)
 		} else if r.Method == http.MethodPost {
 			var i models.AccountPayable
-			json.NewDecoder(r.Body).Decode(&i)
-			procureUC.SaveAccountPayable(&i)
+			if err := json.NewDecoder(r.Body).Decode(&i); err != nil {
+				if serverLogger != nil { serverLogger.Printf("AP Decode Error: %v", err) }
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			if err := procureUC.SaveAccountPayable(&i); err != nil {
+				if serverLogger != nil { serverLogger.Printf("AP Save Error: %v", err) }
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
 			w.WriteHeader(http.StatusOK)
 		}
 	}))
@@ -280,8 +360,16 @@ func main() {
 			json.NewEncoder(w).Encode(list)
 		} else if r.Method == http.MethodPost {
 			var i models.BL
-			json.NewDecoder(r.Body).Decode(&i)
-			procureUC.SaveBL(&i)
+			if err := json.NewDecoder(r.Body).Decode(&i); err != nil {
+				if serverLogger != nil { serverLogger.Printf("BL Decode Error: %v", err) }
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			if err := procureUC.SaveBL(&i); err != nil {
+				if serverLogger != nil { serverLogger.Printf("BL Save Error: %v", err) }
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
 			w.WriteHeader(http.StatusOK)
 		}
 	}))
@@ -294,8 +382,16 @@ func main() {
 			json.NewEncoder(w).Encode(list)
 		} else if r.Method == http.MethodPost {
 			var i models.GoodsReceipt
-			json.NewDecoder(r.Body).Decode(&i)
-			procureUC.SaveGoodsReceipt(&i)
+			if err := json.NewDecoder(r.Body).Decode(&i); err != nil {
+				if serverLogger != nil { serverLogger.Printf("GR Decode Error: %v", err) }
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			if err := procureUC.SaveGoodsReceipt(&i); err != nil {
+				if serverLogger != nil { serverLogger.Printf("GR Save Error: %v", err) }
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
 			w.WriteHeader(http.StatusOK)
 		}
 	}))
@@ -308,8 +404,16 @@ func main() {
 			json.NewEncoder(w).Encode(list)
 		} else if r.Method == http.MethodPost {
 			var i models.InventoryLot
-			json.NewDecoder(r.Body).Decode(&i)
-			procureUC.SaveInventoryLot(&i)
+			if err := json.NewDecoder(r.Body).Decode(&i); err != nil {
+				if serverLogger != nil { serverLogger.Printf("Lot Decode Error: %v", err) }
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			if err := procureUC.SaveInventoryLot(&i); err != nil {
+				if serverLogger != nil { serverLogger.Printf("Lot Save Error: %v", err) }
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
 			w.WriteHeader(http.StatusOK)
 		}
 	}))
@@ -333,8 +437,16 @@ func main() {
 			json.NewEncoder(w).Encode(list)
 		} else if r.Method == http.MethodPost {
 			var i models.CostAllocation
-			json.NewDecoder(r.Body).Decode(&i)
-			procureUC.SaveCostAllocation(&i)
+			if err := json.NewDecoder(r.Body).Decode(&i); err != nil {
+				if serverLogger != nil { serverLogger.Printf("Cost Allocation Decode Error: %v", err) }
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			if err := procureUC.SaveCostAllocation(&i); err != nil {
+				if serverLogger != nil { serverLogger.Printf("Cost Allocation Save Error: %v", err) }
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
 			w.WriteHeader(http.StatusOK)
 		}
 	}))
@@ -343,7 +455,10 @@ func main() {
 	mux.HandleFunc("/api/bookings", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method == http.MethodGet {
-			list, _ := procureUC.GetBookings()
+			list, err := procureUC.GetBookings()
+			if err != nil {
+				fmt.Println("GetBookings Error:", err)
+			}
 			json.NewEncoder(w).Encode(list)
 		}
 	}))
@@ -367,5 +482,8 @@ func main() {
 	mux.Handle("/", http.FileServer(http.FS(distFS)))
 
 	fmt.Println("Server starting on :8080...")
-	http.ListenAndServe(":8080", mux)
+	err = http.ListenAndServe(":8080", mux)
+	if err != nil {
+		fmt.Println("Server Error:", err)
+	}
 }

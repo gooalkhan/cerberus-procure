@@ -9,6 +9,13 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+func nullIfZero(t time.Time) interface{} {
+	if t.IsZero() {
+		return nil
+	}
+	return t
+}
+
 type SQLiteProcurementRepository struct {
 	db *sql.DB
 }
@@ -178,8 +185,8 @@ func migrateProcurement(db *sql.DB) error {
 			GR_ID INTEGER NOT NULL,
 			Container_Item_ID INTEGER NOT NULL,
 			Lot_No TEXT NOT NULL,
-			Expiry_Date DATETIME,
-			Qty REAL CHECK (Qty >= 0),
+			Expiry_Date DATETIME NOT NULL,
+			Qty REAL NOT NULL,
 			Landed_Cost_Per_Unit REAL,
 			Quarantine_Status TEXT,
 			Quarantine_Remark TEXT,
@@ -291,7 +298,7 @@ func (r *SQLiteProcurementRepository) SeedData() error {
 
 // Item Master
 func (r *SQLiteProcurementRepository) GetItems() ([]models.ItemMaster, error) {
-	rows, err := r.db.Query("SELECT Item_ID, SKU_Code, Name, Vendor_ID, CBM, Net_Weight, Gross_Weight, Remark, Created_By, Created_At, Updated_By, Updated_At FROM Item_Master")
+	rows, err := r.db.Query("SELECT Item_ID, SKU_Code, Name, Vendor_ID, IFNULL(CBM, 0), IFNULL(Net_Weight, 0), IFNULL(Gross_Weight, 0), IFNULL(Remark, ''), IFNULL(Created_By, ''), Created_At, IFNULL(Updated_By, ''), Updated_At FROM Item_Master")
 	if err != nil {
 		return nil, err
 	}
@@ -311,7 +318,7 @@ func (r *SQLiteProcurementRepository) GetItems() ([]models.ItemMaster, error) {
 
 func (r *SQLiteProcurementRepository) GetItemByID(id int) (*models.ItemMaster, error) {
 	var i models.ItemMaster
-	err := r.db.QueryRow("SELECT Item_ID, SKU_Code, Name, Vendor_ID, CBM, Net_Weight, Gross_Weight, Remark, Created_By, Created_At, Updated_By, Updated_At FROM Item_Master WHERE Item_ID = ?", id).
+	err := r.db.QueryRow("SELECT Item_ID, SKU_Code, Name, Vendor_ID, IFNULL(CBM, 0), IFNULL(Net_Weight, 0), IFNULL(Gross_Weight, 0), IFNULL(Remark, ''), IFNULL(Created_By, ''), Created_At, IFNULL(Updated_By, ''), Updated_At FROM Item_Master WHERE Item_ID = ?", id).
 		Scan(&i.ID, &i.SKUCode, &i.Name, &i.VendorID, &i.CBM, &i.NetWeight, &i.GrossWeight, &i.Remark, &i.CreatedBy, &i.CreatedAt, &i.UpdatedBy, &i.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -337,7 +344,7 @@ func (r *SQLiteProcurementRepository) SaveItem(i *models.ItemMaster) error {
 
 // Vendor Master
 func (r *SQLiteProcurementRepository) GetVendors() ([]models.VendorMaster, error) {
-	rows, err := r.db.Query("SELECT Vendor_ID, Name, Category, Business_Reg_No, Bank_Account, Remark, Created_By, Created_At, Updated_By, Updated_At FROM Vendor_Master")
+	rows, err := r.db.Query("SELECT Vendor_ID, Name, IFNULL(Category, ''), IFNULL(Business_Reg_No, ''), IFNULL(Bank_Account, ''), IFNULL(Remark, ''), IFNULL(Created_By, ''), Created_At, IFNULL(Updated_By, ''), Updated_At FROM Vendor_Master")
 	if err != nil {
 		return nil, err
 	}
@@ -357,7 +364,7 @@ func (r *SQLiteProcurementRepository) GetVendors() ([]models.VendorMaster, error
 
 func (r *SQLiteProcurementRepository) GetVendorByID(id int) (*models.VendorMaster, error) {
 	var v models.VendorMaster
-	err := r.db.QueryRow("SELECT Vendor_ID, Name, Category, Business_Reg_No, Bank_Account, Remark, Created_By, Created_At, Updated_By, Updated_At FROM Vendor_Master WHERE Vendor_ID = ?", id).
+	err := r.db.QueryRow("SELECT Vendor_ID, Name, IFNULL(Category, ''), IFNULL(Business_Reg_No, ''), IFNULL(Bank_Account, ''), IFNULL(Remark, ''), IFNULL(Created_By, ''), Created_At, IFNULL(Updated_By, ''), Updated_At FROM Vendor_Master WHERE Vendor_ID = ?", id).
 		Scan(&v.ID, &v.Name, &v.Category, &v.BusinessRegNo, &v.BankAccount, &v.Remark, &v.CreatedBy, &v.CreatedAt, &v.UpdatedBy, &v.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -383,7 +390,7 @@ func (r *SQLiteProcurementRepository) SaveVendor(v *models.VendorMaster) error {
 
 // Purchase Order
 func (r *SQLiteProcurementRepository) GetPurchaseOrders() ([]models.PurchaseOrder, error) {
-	rows, err := r.db.Query("SELECT PO_ID, PO_Date, PO_No, Vendor_ID, Currency, Total_Amount, Status, Remark, Created_By, Created_At, Updated_By, Updated_At, UUID FROM Purchase_Order")
+	rows, err := r.db.Query("SELECT PO_ID, PO_Date, PO_No, Vendor_ID, IFNULL(Currency, ''), IFNULL(Total_Amount, 0), Status, IFNULL(Remark, ''), IFNULL(Created_By, ''), Created_At, IFNULL(Updated_By, ''), Updated_At, UUID FROM Purchase_Order")
 	if err != nil {
 		return nil, err
 	}
@@ -403,7 +410,7 @@ func (r *SQLiteProcurementRepository) GetPurchaseOrders() ([]models.PurchaseOrde
 
 func (r *SQLiteProcurementRepository) GetPurchaseOrderByID(id int) (*models.PurchaseOrder, error) {
 	var p models.PurchaseOrder
-	err := r.db.QueryRow("SELECT PO_ID, PO_Date, PO_No, Vendor_ID, Currency, Total_Amount, Status, Remark, Created_By, Created_At, Updated_By, Updated_At, UUID FROM Purchase_Order WHERE PO_ID = ?", id).
+	err := r.db.QueryRow("SELECT PO_ID, PO_Date, PO_No, Vendor_ID, IFNULL(Currency, ''), IFNULL(Total_Amount, 0), Status, IFNULL(Remark, ''), IFNULL(Created_By, ''), Created_At, IFNULL(Updated_By, ''), Updated_At, UUID FROM Purchase_Order WHERE PO_ID = ?", id).
 		Scan(&p.ID, &p.PODate, &p.PONo, &p.VendorID, &p.Currency, &p.TotalAmount, &p.Status, &p.Remark, &p.CreatedBy, &p.CreatedAt, &p.UpdatedBy, &p.UpdatedAt, &p.UUID)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -429,7 +436,7 @@ func (r *SQLiteProcurementRepository) SavePurchaseOrder(p *models.PurchaseOrder)
 
 // PO Item
 func (r *SQLiteProcurementRepository) GetPOItemsByPOID(poID int) ([]models.POItem, error) {
-	rows, err := r.db.Query("SELECT PO_Item_ID, PO_ID, Item_ID, PO_Qty, Unit_Price, Status, Remark, Created_By, Created_At, Updated_By, Updated_At FROM PO_Item WHERE PO_ID = ?", poID)
+	rows, err := r.db.Query("SELECT PO_Item_ID, PO_ID, Item_ID, IFNULL(PO_Qty, 0), IFNULL(Unit_Price, 0), Status, IFNULL(Remark, ''), IFNULL(Created_By, ''), Created_At, IFNULL(Updated_By, ''), Updated_At FROM PO_Item WHERE PO_ID = ?", poID)
 	if err != nil {
 		return nil, err
 	}
@@ -465,7 +472,7 @@ func (r *SQLiteProcurementRepository) SavePOItem(i *models.POItem) error {
 
 // Commercial Invoice
 func (r *SQLiteProcurementRepository) GetCommercialInvoices() ([]models.CommercialInvoice, error) {
-	rows, err := r.db.Query("SELECT CI_ID, CI_No, Invoice_Date, Vendor_ID, Currency, Total_Amount, Status, Remark, Created_By, Created_At, Updated_By, Updated_At, UUID FROM Commercial_Invoice")
+	rows, err := r.db.Query("SELECT CI_ID, CI_No, Invoice_Date, Vendor_ID, IFNULL(Currency, ''), IFNULL(Total_Amount, 0), Status, IFNULL(Remark, ''), IFNULL(Created_By, ''), Created_At, IFNULL(Updated_By, ''), Updated_At, UUID FROM Commercial_Invoice")
 	if err != nil {
 		return nil, err
 	}
@@ -520,7 +527,7 @@ func (r *SQLiteProcurementRepository) SaveCommercialInvoice(i *models.Commercial
 
 // Account Payable
 func (r *SQLiteProcurementRepository) GetAccountPayables() ([]models.AccountPayable, error) {
-	rows, err := r.db.Query("SELECT AP_ID, Vendor_ID, AP_No, Amount, Currency, Local_Amount, Allocation_Type, Reference_UUID, Reference_Type, Due_Date, Date_of_Payment, Status, Allocation_Status, Remark, Created_By, Created_At, Updated_By, Updated_At, UUID FROM Account_Payable")
+	rows, err := r.db.Query("SELECT AP_ID, Vendor_ID, AP_No, IFNULL(Amount, 0), IFNULL(Currency, ''), IFNULL(Local_Amount, 0), IFNULL(Allocation_Type, ''), IFNULL(Reference_UUID, ''), IFNULL(Reference_Type, ''), Due_Date, Date_of_Payment, Status, IFNULL(Allocation_Status, ''), IFNULL(Remark, ''), IFNULL(Created_By, ''), Created_At, IFNULL(Updated_By, ''), Updated_At, UUID FROM Account_Payable")
 	if err != nil {
 		return nil, err
 	}
@@ -528,7 +535,13 @@ func (r *SQLiteProcurementRepository) GetAccountPayables() ([]models.AccountPaya
 	list := []models.AccountPayable{}
 	for rows.Next() {
 		var i models.AccountPayable
-		rows.Scan(&i.ID, &i.VendorID, &i.APNo, &i.Amount, &i.Currency, &i.LocalAmount, &i.AllocationType, &i.ReferenceUUID, &i.ReferenceType, &i.DueDate, &i.DateOfPayment, &i.Status, &i.AllocationStatus, &i.Remark, &i.CreatedBy, &i.CreatedAt, &i.UpdatedBy, &i.UpdatedAt, &i.UUID)
+		var dueDate, dateOfPayment *time.Time
+		err := rows.Scan(&i.ID, &i.VendorID, &i.APNo, &i.Amount, &i.Currency, &i.LocalAmount, &i.AllocationType, &i.ReferenceUUID, &i.ReferenceType, &dueDate, &dateOfPayment, &i.Status, &i.AllocationStatus, &i.Remark, &i.CreatedBy, &i.CreatedAt, &i.UpdatedBy, &i.UpdatedAt, &i.UUID)
+		if err != nil {
+			return nil, err
+		}
+		if dueDate != nil { i.DueDate = *dueDate }
+		if dateOfPayment != nil { i.DateOfPayment = *dateOfPayment }
 		list = append(list, i)
 	}
 	return list, nil
@@ -537,7 +550,7 @@ func (r *SQLiteProcurementRepository) GetAccountPayables() ([]models.AccountPaya
 func (r *SQLiteProcurementRepository) SaveAccountPayable(i *models.AccountPayable) error {
 	if i.ID == 0 {
 		res, err := r.db.Exec("INSERT INTO Account_Payable (Vendor_ID, AP_No, Amount, Currency, Local_Amount, Allocation_Type, Reference_UUID, Reference_Type, Due_Date, Date_of_Payment, Status, Allocation_Status, Remark, Created_By, UUID) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-			i.VendorID, i.APNo, i.Amount, i.Currency, i.LocalAmount, i.AllocationType, i.ReferenceUUID, i.ReferenceType, i.DueDate, i.DateOfPayment, i.Status, i.AllocationStatus, i.Remark, i.CreatedBy, i.UUID)
+			i.VendorID, i.APNo, i.Amount, i.Currency, i.LocalAmount, i.AllocationType, i.ReferenceUUID, i.ReferenceType, nullIfZero(i.DueDate), nullIfZero(i.DateOfPayment), i.Status, i.AllocationStatus, i.Remark, i.CreatedBy, i.UUID)
 		if err != nil {
 			return err
 		}
@@ -546,13 +559,13 @@ func (r *SQLiteProcurementRepository) SaveAccountPayable(i *models.AccountPayabl
 		return nil
 	}
 	_, err := r.db.Exec("UPDATE Account_Payable SET Vendor_ID=?, AP_No=?, Amount=?, Currency=?, Local_Amount=?, Allocation_Type=?, Reference_UUID=?, Reference_Type=?, Due_Date=?, Date_of_Payment=?, Status=?, Allocation_Status=?, Remark=?, Updated_By=?, Updated_At=CURRENT_TIMESTAMP WHERE AP_ID=?",
-		i.VendorID, i.APNo, i.Amount, i.Currency, i.LocalAmount, i.AllocationType, i.ReferenceUUID, i.ReferenceType, i.DueDate, i.DateOfPayment, i.Status, i.AllocationStatus, i.Remark, i.UpdatedBy, i.ID)
+		i.VendorID, i.APNo, i.Amount, i.Currency, i.LocalAmount, i.AllocationType, i.ReferenceUUID, i.ReferenceType, nullIfZero(i.DueDate), nullIfZero(i.DateOfPayment), i.Status, i.AllocationStatus, i.Remark, i.UpdatedBy, i.ID)
 	return err
 }
 
 // Container & Logistics
 func (r *SQLiteProcurementRepository) GetContainers() ([]models.Container, error) {
-	rows, err := r.db.Query("SELECT Container_ID, Container_No, Remark, Total_CBM, Total_Net_Wgt, Total_Gross_Wgt, Status, UUID FROM Container")
+	rows, err := r.db.Query("SELECT Container_ID, Container_No, IFNULL(Remark, ''), IFNULL(Total_CBM, 0), IFNULL(Total_Net_Wgt, ''), IFNULL(Total_Gross_Wgt, ''), Status, UUID FROM Container")
 	if err != nil {
 		return nil, err
 	}
@@ -583,7 +596,7 @@ func (r *SQLiteProcurementRepository) SaveContainer(i *models.Container) error {
 }
 
 func (r *SQLiteProcurementRepository) GetBLs() ([]models.BL, error) {
-	rows, err := r.db.Query("SELECT BL_ID, BL_No, ETD, ETA, POL, POD, Carrier, Vessel_Name, Status, Remark, UUID FROM BL")
+	rows, err := r.db.Query("SELECT BL_ID, BL_No, ETD, ETA, IFNULL(POL, ''), IFNULL(POD, ''), IFNULL(Carrier, ''), IFNULL(Vessel_Name, ''), Status, IFNULL(Remark, ''), UUID FROM BL")
 	if err != nil {
 		return nil, err
 	}
@@ -615,7 +628,7 @@ func (r *SQLiteProcurementRepository) SaveBL(i *models.BL) error {
 
 // Goods Receipt & Inventory
 func (r *SQLiteProcurementRepository) GetGoodsReceipts() ([]models.GoodsReceipt, error) {
-	rows, err := r.db.Query("SELECT GR_ID, Container_ID, BL_ID, Receive_Date, Remark, Created_By, UUID FROM Goods_Receipt")
+	rows, err := r.db.Query("SELECT GR_ID, Container_ID, BL_ID, Receive_Date, IFNULL(Remark, ''), IFNULL(Created_By, ''), UUID FROM Goods_Receipt")
 	if err != nil {
 		return nil, err
 	}
@@ -645,7 +658,7 @@ func (r *SQLiteProcurementRepository) SaveGoodsReceipt(i *models.GoodsReceipt) e
 }
 
 func (r *SQLiteProcurementRepository) GetInventoryLots() ([]models.InventoryLot, error) {
-	rows, err := r.db.Query("SELECT Lot_ID, GR_ID, Container_Item_ID, Lot_No, Expiry_Date, Qty, Landed_Cost_Per_Unit, Quarantine_Status, Quarantine_Remark, Remark, UUID FROM Inventory_Lot")
+	rows, err := r.db.Query("SELECT Lot_ID, GR_ID, Container_Item_ID, Lot_No, Expiry_Date, IFNULL(Qty, 0), IFNULL(Landed_Cost_Per_Unit, 0), IFNULL(Quarantine_Status, ''), IFNULL(Quarantine_Remark, ''), IFNULL(Remark, ''), UUID FROM Inventory_Lot")
 	if err != nil {
 		return nil, err
 	}
@@ -660,7 +673,7 @@ func (r *SQLiteProcurementRepository) GetInventoryLots() ([]models.InventoryLot,
 }
 
 func (r *SQLiteProcurementRepository) GetInventoryLotsByGRID(grID int) ([]models.InventoryLot, error) {
-	rows, err := r.db.Query("SELECT Lot_ID, GR_ID, Container_Item_ID, Lot_No, Expiry_Date, Qty, Landed_Cost_Per_Unit, Quarantine_Status, Remark, UUID FROM Inventory_Lot WHERE GR_ID = ?", grID)
+	rows, err := r.db.Query("SELECT Lot_ID, GR_ID, Container_Item_ID, Lot_No, Expiry_Date, IFNULL(Qty, 0), IFNULL(Landed_Cost_Per_Unit, 0), IFNULL(Quarantine_Status, ''), IFNULL(Remark, ''), UUID FROM Inventory_Lot WHERE GR_ID = ?", grID)
 	if err != nil {
 		return nil, err
 	}
@@ -696,7 +709,7 @@ func (r *SQLiteProcurementRepository) SaveInventoryLot(i *models.InventoryLot) e
 
 // Cost Allocation
 func (r *SQLiteProcurementRepository) GetCostAllocations() ([]models.CostAllocation, error) {
-	rows, err := r.db.Query("SELECT Cost_Allocation_ID, Allocation_date, Total_Allocated_Amount, Remark, Created_By, Created_At, Updated_By, Updated_At FROM Cost_Allocation")
+	rows, err := r.db.Query("SELECT Cost_Allocation_ID, Allocation_date, IFNULL(Total_Allocated_Amount, 0), IFNULL(Remark, ''), IFNULL(Created_By, ''), Created_At, IFNULL(Updated_By, ''), Updated_At FROM Cost_Allocation")
 	if err != nil {
 		return nil, err
 	}
@@ -728,7 +741,7 @@ func (r *SQLiteProcurementRepository) SaveCostAllocation(ca *models.CostAllocati
 
 // Container Items
 func (r *SQLiteProcurementRepository) GetContainerItemsByContainerID(containerID int) ([]models.ContainerItem, error) {
-	rows, err := r.db.Query("SELECT Container_Item_ID, PO_Item_ID, Container_ID, CI_ID, BL_ID, Item_ID, Unit_Price, Currency, Load_Qty, Gross_Weight, Net_Weight, Cbm FROM Container_Item WHERE Container_ID = ?", containerID)
+	rows, err := r.db.Query("SELECT Container_Item_ID, PO_Item_ID, IFNULL(Container_ID, 0), IFNULL(CI_ID, 0), IFNULL(BL_ID, 0), Item_ID, IFNULL(Unit_Price, 0), IFNULL(Currency, ''), IFNULL(Load_Qty, 0), IFNULL(Gross_Weight, 0), IFNULL(Net_Weight, 0), IFNULL(Cbm, 0), IFNULL(Remark, '') FROM Container_Item WHERE Container_ID = ?", containerID)
 	if err != nil {
 		return nil, err
 	}
@@ -736,7 +749,10 @@ func (r *SQLiteProcurementRepository) GetContainerItemsByContainerID(containerID
 	list := []models.ContainerItem{}
 	for rows.Next() {
 		var i models.ContainerItem
-		rows.Scan(&i.ID, &i.POItemID, &i.ContainerID, &i.CIID, &i.BLID, &i.ItemID, &i.UnitPrice, &i.Currency, &i.LoadQty, &i.GrossWeight, &i.NetWeight, &i.CBM)
+		err := rows.Scan(&i.ID, &i.POItemID, &i.ContainerID, &i.CIID, &i.BLID, &i.ItemID, &i.UnitPrice, &i.Currency, &i.LoadQty, &i.GrossWeight, &i.NetWeight, &i.CBM, &i.Remark)
+		if err != nil {
+			return nil, err
+		}
 		list = append(list, i)
 	}
 	return list, nil
@@ -756,7 +772,7 @@ func (r *SQLiteProcurementRepository) SaveContainerItem(i *models.ContainerItem)
 
 // Cost Allocation Items
 func (r *SQLiteProcurementRepository) GetCostAllocationItemsByAllocationID(caID int) ([]models.CostAllocationItem, error) {
-	rows, err := r.db.Query("SELECT Cost_Allocation_Item_ID, Cost_Allocation_ID, Lot_ID, Allocated_Amount, AP_ID FROM Cost_Allocation_Item WHERE Cost_Allocation_ID = ?", caID)
+	rows, err := r.db.Query("SELECT Cost_Allocation_Item_ID, Cost_Allocation_ID, Lot_ID, IFNULL(Allocated_Amount, 0), AP_ID FROM Cost_Allocation_Item WHERE Cost_Allocation_ID = ?", caID)
 	if err != nil {
 		return nil, err
 	}
@@ -812,32 +828,32 @@ func (r *SQLiteProcurementRepository) GetBookings() ([]models.BookingView, error
 	query := `
 		SELECT 
 			ci.Container_Item_ID,
-			ci.Container_ID,
-			c.Container_No,
-			c.Status,
-			c.Total_CBM,
-			c.Total_Net_Wgt,
-			c.Total_Gross_Wgt,
-			ci.BL_ID,
-			b.BL_No,
-			b.Status as BL_Status,
+			IFNULL(ci.Container_ID, 0),
+			IFNULL(c.Container_No, ''),
+			IFNULL(c.Status, ''),
+			IFNULL(c.Total_CBM, 0),
+			IFNULL(c.Total_Net_Wgt, 0),
+			IFNULL(c.Total_Gross_Wgt, 0),
+			IFNULL(ci.BL_ID, 0),
+			IFNULL(b.BL_No, ''),
+			IFNULL(b.Status, '') as BL_Status,
 			b.ETD,
 			b.ETA,
-			b.POL,
-			b.POD,
-			b.Carrier,
-			b.Vessel_Name,
-			ci.PO_Item_ID,
-			ci.Item_ID,
-			im.Name as Item_Name,
-			ci.CI_ID,
-			ci.Load_Qty,
-			ci.Unit_Price,
-			ci.Currency,
-			ci.Gross_Weight,
-			ci.Net_Weight,
-			ci.Cbm,
-			ci.Remark
+			IFNULL(b.POL, ''),
+			IFNULL(b.POD, ''),
+			IFNULL(b.Carrier, ''),
+			IFNULL(b.Vessel_Name, ''),
+			IFNULL(ci.PO_Item_ID, 0),
+			IFNULL(ci.Item_ID, 0),
+			IFNULL(im.Name, '') as Item_Name,
+			IFNULL(ci.CI_ID, 0),
+			IFNULL(ci.Load_Qty, 0),
+			IFNULL(ci.Unit_Price, 0),
+			IFNULL(ci.Currency, ''),
+			IFNULL(ci.Gross_Weight, 0),
+			IFNULL(ci.Net_Weight, 0),
+			IFNULL(ci.Cbm, 0),
+			IFNULL(ci.Remark, '')
 		FROM Container_Item ci
 		LEFT JOIN Container c ON ci.Container_ID = c.Container_ID
 		LEFT JOIN BL b ON ci.BL_ID = b.BL_ID
@@ -861,10 +877,11 @@ func (r *SQLiteProcurementRepository) GetBookings() ([]models.BookingView, error
 	list := []models.BookingView{}
 	for rows.Next() {
 		var b models.BookingView
+		var etd, eta *time.Time
 		err := rows.Scan(
 			&b.ContainerItemID, &b.ContainerID, &b.ContainerNo, &b.Status,
 			&b.TotalCBM, &b.TotalNetWgt, &b.TotalGrossWgt,
-			&b.BLID, &b.BLNo, &b.BLStatus, &b.ETD, &b.ETA,
+			&b.BLID, &b.BLNo, &b.BLStatus, &etd, &eta,
 			&b.POL, &b.POD, &b.Carrier, &b.VesselName,
 			&b.POItemID, &b.ItemID, &b.ItemName, &b.CIID, &b.LoadQty, &b.UnitPrice, &b.Currency,
 			&b.GrossWeight, &b.NetWeight, &b.CBM, &b.Remark,
@@ -872,6 +889,8 @@ func (r *SQLiteProcurementRepository) GetBookings() ([]models.BookingView, error
 		if err != nil {
 			return nil, err
 		}
+		if etd != nil { b.ETD = *etd }
+		if eta != nil { b.ETA = *eta }
 		list = append(list, b)
 	}
 	return list, nil

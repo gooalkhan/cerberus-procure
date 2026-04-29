@@ -114,7 +114,7 @@ function App() {
                 remark: booking.remark || '',
               });
             }}
-            emptyItem={{ container_item_id: 0, container_id: 0, container_no: '', status: 'Loaded', total_cbm: 0, total_net_wgt: 0, total_gross_wgt: 0, bl_id: 0, bl_no: '', bl_status: 'Released', etd: '', eta: '', pol: '', pod: '', carrier: '', vessel_name: '', po_item_id: 0, item_id: 0, ci_id: 0, load_qty: 0, unit_price: 0, currency: 'USD', gross_weight: 0, net_weight: 0, cbm: 0, remark: '' }}
+            emptyItem={{ container_item_id: 0, container_id: 0, container_no: '', status: 'Loaded', total_cbm: 0, total_net_wgt: 0, total_gross_wgt: 0, bl_id: 0, bl_no: '', bl_status: 'Released', etd: null, eta: null, pol: '', pod: '', carrier: '', vessel_name: '', po_item_id: 0, item_id: 0, ci_id: 0, load_qty: 0, unit_price: 0, currency: 'USD', gross_weight: 0, net_weight: 0, cbm: 0, remark: '' }}
             renderDetail={(booking) => <BookingFlow booking={booking} />}
           />
         )
@@ -194,7 +194,7 @@ function App() {
             ]}
             fetchData={procureApi.getAccountPayables}
             onSave={procureApi.saveAccountPayable}
-            emptyItem={{ ap_id: 0, vendor_id: 0, ap_no: '', amount: 0, currency: 'USD', local_amount: 0, allocation_type: 'Amount', reference_uuid: '', reference_type: 'PO', due_date: new Date().toISOString(), date_of_payment: '', status: 'unpaid', allocation_status: 'Draft', remark: '', uuid: '' }}
+            emptyItem={{ ap_id: 0, vendor_id: 0, ap_no: '', amount: 0, currency: 'USD', local_amount: 0, allocation_type: 'Value', reference_uuid: '', reference_type: 'PO', due_date: new Date().toISOString(), date_of_payment: null, status: 'unpaid', allocation_status: 'Draft', remark: '', uuid: '' }}
             renderDetail={(ap, onChange) => <APDetail ap={ap} onChange={onChange} />}
           />
         )
@@ -295,7 +295,7 @@ function APDetail({ ap, onChange }: { ap: any, onChange: (updated: any) => void 
             value={ap.allocation_type} 
             onChange={e => onChange({ ...ap, allocation_type: e.target.value })}
           >
-            {['Amount', 'Quantity', 'CBM', 'Weight', 'Lot', 'Item'].map(t => (
+            {['Weight', 'Volume', 'Quantity', 'Value', 'Unit'].map(t => (
               <option key={t} value={t}>{t}</option>
             ))}
           </select>
@@ -347,7 +347,7 @@ function CIDetail({ ci }: { ci: any }) {
   if (!ci.ci_id) return null;
   const [items, setItems] = useState<any[]>([]);
   const [aps, setAps] = useState<any[]>([]);
-  const [newAp, setNewAp] = useState({ ap_no: '', currency: ci.currency || 'USD', amount: 0, due_date: '' });
+  const [newAp, setNewAp] = useState({ ap_no: '', currency: ci.currency || 'USD', amount: 0, due_date: null as string | null });
 
   const loadData = useCallback(() => {
     procureApi.getCIAggregatedItems(ci.ci_id).then(setItems);
@@ -373,9 +373,10 @@ function CIDetail({ ci }: { ci: any }) {
       reference_type: 'CI',
       status: 'unpaid',
       allocation_status: 'Open',
+      allocation_type: 'Value',
       local_amount: newAp.amount // Defaulting local amount to same for simplicity
     } as any);
-    setNewAp({ ap_no: '', currency: ci.currency || 'USD', amount: 0, due_date: '' });
+    setNewAp({ ap_no: '', currency: ci.currency || 'USD', amount: 0, due_date: null });
     loadData();
   };
 
@@ -426,7 +427,7 @@ function CIDetail({ ci }: { ci: any }) {
           </div>
           <div className="form-group">
             <label>Due Date</label>
-            <input type="date" value={newAp.due_date} onChange={e => setNewAp({...newAp, due_date: e.target.value})} />
+            <input type="date" value={newAp.due_date || ''} onChange={e => setNewAp({...newAp, due_date: e.target.value})} />
           </div>
           <div className="form-group" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
             <label>&nbsp;</label>
@@ -690,7 +691,7 @@ function LandedGoodsDetail({ gr, onChange }: { gr: any, onChange: (updated: any)
   }, [gr.container_id]);
 
   const handleAddLot = () => {
-    const newLot = { lot_id: 0, container_item_id: 0, lot_no: '', expiry_date: '', qty: 0, remark: '' };
+    const newLot = { lot_id: 0, container_item_id: 0, lot_no: '', expiry_date: null, qty: 0, remark: '' };
     const updated = [...lots, newLot];
     setLots(updated);
     onChange({ ...gr, lots: updated });

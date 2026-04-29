@@ -259,7 +259,15 @@ function CrudPage<T extends { [key: string]: any }>({ title, columns, fetchData,
                       value={col.type === 'date' && selectedItem[col.key] 
                         ? new Date(selectedItem[col.key]).toISOString().split('T')[0] 
                         : selectedItem[col.key] || ''}
-                      onChange={(e) => setSelectedItem({ ...selectedItem, [col.key]: col.type === 'number' ? Number(e.target.value) : e.target.value })}
+                      onChange={(e) => {
+                        let val: any = e.target.value;
+                        if (col.type === 'number') {
+                          val = Number(val);
+                        } else if (col.type === 'date') {
+                          val = val ? new Date(val).toISOString() : null;
+                        }
+                        setSelectedItem({ ...selectedItem, [col.key]: val });
+                      }}
                     />
                   </div>
                 );
