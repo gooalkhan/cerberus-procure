@@ -36,20 +36,20 @@ type VendorMaster struct {
 
 // PurchaseOrder 수입 발주 기본 정보
 type PurchaseOrder struct {
-	ID        int       `json:"po_id"`
-	PODate    time.Time `json:"po_date"`
-	PONo      string    `json:"po_no"`
+	ID          int       `json:"po_id"`
+	PODate      time.Time `json:"po_date"`
+	PONo        string    `json:"po_no"`
 	VendorID    int       `json:"vendor_id"`
 	Currency    string    `json:"currency"`
 	TotalAmount float64   `json:"total_amount"`
 	Status      string    `json:"status"`
-	Remark    string    `json:"remark"`
-	CreatedBy string    `json:"created_by"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedBy string    `json:"updated_by"`
-	UpdatedAt time.Time `json:"updated_at"`
-	UUID      string    `json:"uuid"`
-	Items     []POItem  `json:"items,omitempty"`
+	Remark      string    `json:"remark"`
+	CreatedBy   string    `json:"created_by"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedBy   string    `json:"updated_by"`
+	UpdatedAt   time.Time `json:"updated_at"`
+	UUID        string    `json:"uuid"`
+	Items       []POItem  `json:"items,omitempty"`
 }
 
 // POItem 발주 품목 정보
@@ -116,7 +116,6 @@ type AccountPayable struct {
 	UUID             string    `json:"uuid"`
 }
 
-
 // Container 운송 단위 정보
 type Container struct {
 	ID            int     `json:"container_id"`
@@ -164,8 +163,6 @@ type BL struct {
 // GoodsReceipt 입고 기록
 type GoodsReceipt struct {
 	ID          int       `json:"gr_id"`
-	ContainerID int       `json:"container_id"`
-	BLID        int       `json:"bl_id"`
 	ReceiveDate time.Time `json:"receive_date"`
 	Remark      string    `json:"remark"`
 	CreatedBy   string    `json:"created_by"`
@@ -245,4 +242,3 @@ type BookingView struct {
 	CBM             float64   `json:"cbm"`
 	Remark          string    `json:"remark"`
 }
-

@@ -32,7 +32,7 @@ N:N:N 아이템 매핑을 통해 복잡한 혼적 상황을 해결합니다.
 
 | Table | Columns | Description |
 | :--- | :--- | :--- |
-| **Goods_Receipt** | GR_ID (PK), Container_ID (FK, NN), BL_ID (FK, NN), Receive_Date (NN), Remark, Created_By, UUID (UK, NN) | 컨테이너 입고 기록. |
+| **Goods_Receipt** | GR_ID (PK), Receive_Date (NN), Remark, Created_By, UUID (UK, NN) | 컨테이너 입고 기록. |
 | **Inventory_Lot** | Lot_ID (PK), GR_ID (FK, NN), Container_Item_ID (FK, NN), Lot_No (NN), Expiry_Date (Nullable), Qty (NN), Landed_Cost_Per_Unit, Quarantine_Status, Quarantine_Remark, Remark, UUID (UK, NN) | 재고 최소 단위. |
 
 ## 5. 랜딩 코스트 부대비용 (Landing Cost)

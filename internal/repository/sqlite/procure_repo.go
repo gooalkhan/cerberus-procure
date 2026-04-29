@@ -171,14 +171,10 @@ func migrateProcurement(db *sql.DB) error {
 		)`,
 		`CREATE TABLE IF NOT EXISTS Goods_Receipt (
 			GR_ID INTEGER PRIMARY KEY AUTOINCREMENT,
-			Container_ID INTEGER NOT NULL,
-			BL_ID INTEGER NOT NULL,
 			Receive_Date DATETIME NOT NULL,
 			Remark TEXT,
 			Created_By TEXT,
-			UUID TEXT UNIQUE NOT NULL,
-			FOREIGN KEY (Container_ID) REFERENCES Container(Container_ID),
-			FOREIGN KEY (BL_ID) REFERENCES BL(BL_ID)
+			UUID TEXT UNIQUE NOT NULL
 		)`,
 		`CREATE TABLE IF NOT EXISTS Inventory_Lot (
 			Lot_ID INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -540,8 +536,12 @@ func (r *SQLiteProcurementRepository) GetAccountPayables() ([]models.AccountPaya
 		if err != nil {
 			return nil, err
 		}
-		if dueDate != nil { i.DueDate = *dueDate }
-		if dateOfPayment != nil { i.DateOfPayment = *dateOfPayment }
+		if dueDate != nil {
+			i.DueDate = *dueDate
+		}
+		if dateOfPayment != nil {
+			i.DateOfPayment = *dateOfPayment
+		}
 		list = append(list, i)
 	}
 	return list, nil
@@ -581,7 +581,7 @@ func (r *SQLiteProcurementRepository) GetContainers() ([]models.Container, error
 
 func (r *SQLiteProcurementRepository) SaveContainer(i *models.Container) error {
 	if i.ID == 0 {
-		res, err := r.db.Exec("INSERT INTO Container (Container_No, Remark, Total_CBM, Total_Net_Wgt, Total_Gross_Wgt, Status, UUID) VALUES (?, ?, ?, ?, ?, ?, ?)", 
+		res, err := r.db.Exec("INSERT INTO Container (Container_No, Remark, Total_CBM, Total_Net_Wgt, Total_Gross_Wgt, Status, UUID) VALUES (?, ?, ?, ?, ?, ?, ?)",
 			i.ContainerNo, i.Remark, i.TotalCBM, i.TotalNetWgt, i.TotalGrossWgt, i.Status, i.UUID)
 		if err != nil {
 			return err
@@ -590,7 +590,7 @@ func (r *SQLiteProcurementRepository) SaveContainer(i *models.Container) error {
 		i.ID = int(id)
 		return nil
 	}
-	_, err := r.db.Exec("UPDATE Container SET Container_No=?, Remark=?, Total_CBM=?, Total_Net_Wgt=?, Total_Gross_Wgt=?, Status=? WHERE Container_ID=?", 
+	_, err := r.db.Exec("UPDATE Container SET Container_No=?, Remark=?, Total_CBM=?, Total_Net_Wgt=?, Total_Gross_Wgt=?, Status=? WHERE Container_ID=?",
 		i.ContainerNo, i.Remark, i.TotalCBM, i.TotalNetWgt, i.TotalGrossWgt, i.Status, i.ID)
 	return err
 }
@@ -612,7 +612,7 @@ func (r *SQLiteProcurementRepository) GetBLs() ([]models.BL, error) {
 
 func (r *SQLiteProcurementRepository) SaveBL(i *models.BL) error {
 	if i.ID == 0 {
-		res, err := r.db.Exec("INSERT INTO BL (BL_No, ETD, ETA, POL, POD, Carrier, Vessel_Name, Status, Remark, UUID) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", 
+		res, err := r.db.Exec("INSERT INTO BL (BL_No, ETD, ETA, POL, POD, Carrier, Vessel_Name, Status, Remark, UUID) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
 			i.BLNo, i.ETD, i.ETA, i.POL, i.POD, i.Carrier, i.VesselName, i.Status, i.Remark, i.UUID)
 		if err != nil {
 			return err
@@ -621,14 +621,14 @@ func (r *SQLiteProcurementRepository) SaveBL(i *models.BL) error {
 		i.ID = int(id)
 		return nil
 	}
-	_, err := r.db.Exec("UPDATE BL SET BL_No=?, ETD=?, ETA=?, POL=?, POD=?, Carrier=?, Vessel_Name=?, Status=?, Remark=? WHERE BL_ID=?", 
+	_, err := r.db.Exec("UPDATE BL SET BL_No=?, ETD=?, ETA=?, POL=?, POD=?, Carrier=?, Vessel_Name=?, Status=?, Remark=? WHERE BL_ID=?",
 		i.BLNo, i.ETD, i.ETA, i.POL, i.POD, i.Carrier, i.VesselName, i.Status, i.Remark, i.ID)
 	return err
 }
 
 // Goods Receipt & Inventory
 func (r *SQLiteProcurementRepository) GetGoodsReceipts() ([]models.GoodsReceipt, error) {
-	rows, err := r.db.Query("SELECT GR_ID, Container_ID, BL_ID, Receive_Date, IFNULL(Remark, ''), IFNULL(Created_By, ''), UUID FROM Goods_Receipt")
+	rows, err := r.db.Query("SELECT GR_ID, Receive_Date, IFNULL(Remark, ''), IFNULL(Created_By, ''), UUID FROM Goods_Receipt")
 	if err != nil {
 		return nil, err
 	}
@@ -636,7 +636,7 @@ func (r *SQLiteProcurementRepository) GetGoodsReceipts() ([]models.GoodsReceipt,
 	list := []models.GoodsReceipt{}
 	for rows.Next() {
 		var i models.GoodsReceipt
-		rows.Scan(&i.ID, &i.ContainerID, &i.BLID, &i.ReceiveDate, &i.Remark, &i.CreatedBy, &i.UUID)
+		rows.Scan(&i.ID, &i.ReceiveDate, &i.Remark, &i.CreatedBy, &i.UUID)
 		list = append(list, i)
 	}
 	return list, nil
@@ -644,8 +644,8 @@ func (r *SQLiteProcurementRepository) GetGoodsReceipts() ([]models.GoodsReceipt,
 
 func (r *SQLiteProcurementRepository) SaveGoodsReceipt(i *models.GoodsReceipt) error {
 	if i.ID == 0 {
-		res, err := r.db.Exec("INSERT INTO Goods_Receipt (Container_ID, BL_ID, Receive_Date, Remark, Created_By, UUID) VALUES (?, ?, ?, ?, ?, ?)",
-			i.ContainerID, i.BLID, i.ReceiveDate, i.Remark, i.CreatedBy, i.UUID)
+		res, err := r.db.Exec("INSERT INTO Goods_Receipt (Receive_Date, Remark, Created_By, UUID) VALUES (?, ?, ?, ?)",
+			i.ReceiveDate, i.Remark, i.CreatedBy, i.UUID)
 		if err != nil {
 			return err
 		}
@@ -653,7 +653,7 @@ func (r *SQLiteProcurementRepository) SaveGoodsReceipt(i *models.GoodsReceipt) e
 		i.ID = int(id)
 		return nil
 	}
-	_, err := r.db.Exec("UPDATE Goods_Receipt SET Container_ID=?, BL_ID=?, Receive_Date=?, Remark=? WHERE GR_ID=?", i.ContainerID, i.BLID, i.ReceiveDate, i.Remark, i.ID)
+	_, err := r.db.Exec("UPDATE Goods_Receipt SET Receive_Date=?, Remark=? WHERE GR_ID=?", i.ReceiveDate, i.Remark, i.ID)
 	return err
 }
 
@@ -893,8 +893,12 @@ func (r *SQLiteProcurementRepository) GetBookings() ([]models.BookingView, error
 		if err != nil {
 			return nil, err
 		}
-		if etd != nil { b.ETD = *etd }
-		if eta != nil { b.ETA = *eta }
+		if etd != nil {
+			b.ETD = *etd
+		}
+		if eta != nil {
+			b.ETA = *eta
+		}
 		list = append(list, b)
 	}
 	return list, nil

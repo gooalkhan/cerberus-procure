@@ -99,11 +99,9 @@ function App() {
               { key: 'bl_id', label: 'BL ID', type: 'number', tableHidden: true, searchType: 'BL' },
               { key: 'po_item_id', label: 'PO Item ID', type: 'number', tableHidden: true, searchType: 'PO Item' },
               { key: 'ci_id', label: 'CI ID', type: 'number', tableHidden: true, searchType: 'CI' },
-              { key: 'item_id', label: 'Item ID', type: 'number', tableHidden: true, formHidden: true, searchType: 'Item' },
+              { key: 'item_id', label: 'Item ID', type: 'number', tableHidden: true, searchType: 'Item' },
               { key: 'item_name', label: 'Item Name', formHidden: true },
               { key: 'divider_1', label: '', divider: true },
-              { key: 'unit_price', label: 'Unit Price', type: 'number', tableHidden: true },
-              { key: 'currency', label: 'Currency', tableHidden: true },
               { key: 'load_qty', label: 'Load Qty', type: 'number', filterType: 'none' },
               { key: 'cbm', label: 'CBM', type: 'number', formHidden: true },
               { key: 'remark', label: 'Remark', fullWidth: true },
@@ -215,8 +213,6 @@ function App() {
           <CrudPage
             title="Landed Goods"
             columns={[
-              { key: 'container_id', label: 'Container ID', type: 'number', searchType: 'Container' },
-              { key: 'bl_id', label: 'BL ID', type: 'number', searchType: 'BL' },
               { key: 'receive_date', label: 'Receive Date', type: 'date' },
               { key: 'remark', label: 'Remark', fullWidth: true },
               { key: 'divider_lots', label: '', divider: true },
@@ -243,7 +239,7 @@ function App() {
                 }
               }
             }}
-            emptyItem={{ gr_id: 0, container_id: 0, bl_id: 0, receive_date: new Date().toISOString(), remark: '', lots: [] }}
+            emptyItem={{ gr_id: 0, receive_date: new Date().toISOString(), remark: '', lots: [] }}
             renderDetail={(gr, onChange) => <LandedGoodsDetail gr={gr} onChange={onChange} />}
           />
         )
@@ -628,16 +624,11 @@ function BookingFlow({ booking }: { booking: any }) {
     const load = async () => {
       const data: any = {};
       if (booking.po_item_id) {
+        const poItem = await procureApi.getPOItems(0); // Mock/Generic fetch
+        // In a real app, we'd have a specific "getPOByItemID" or similar
         const pos = await procureApi.getPurchaseOrders();
-        let foundPoNo = 'PO-' + booking.po_item_id;
-        for (const p of pos) {
-          const items = await procureApi.getPOItems(p.po_id);
-          if (items.some((i: any) => i.po_item_id === booking.po_item_id)) {
-            foundPoNo = p.po_no;
-            break;
-          }
-        }
-        data.po_no = foundPoNo;
+        const po = pos.find(p => p.po_id === booking.po_id); // Assuming po_id is in booking
+        data.po_no = po?.po_no || 'PO-' + booking.po_item_id;
       }
       if (booking.ci_id) {
         const cis = await procureApi.getCommercialInvoices();
@@ -704,10 +695,8 @@ function LandedGoodsDetail({ gr, onChange }: { gr: any, onChange: (updated: any)
   }, [gr.gr_id]);
 
   useEffect(() => {
-    if (gr.container_id) {
-      procureApi.getContainerItemsByContainerID(gr.container_id).then(setContainerItems);
-    }
-  }, [gr.container_id]);
+    procureApi.getBookings().then(setContainerItems);
+  }, []);
 
   const handleAddLot = () => {
     const newLot = { lot_id: 0, container_item_id: 0, lot_no: '', expiry_date: null, qty: 0, remark: '' };

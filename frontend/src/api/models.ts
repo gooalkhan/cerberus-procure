@@ -124,8 +124,6 @@ export interface BL {
 
 export interface GoodsReceipt {
   gr_id: number;
-  container_id: number;
-  bl_id: number;
   receive_date: string;
   remark: string;
   uuid: string;

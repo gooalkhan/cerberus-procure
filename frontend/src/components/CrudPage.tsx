@@ -53,7 +53,7 @@ function CrudPage<T extends { [key: string]: any }>({ title, columns, fetchData,
 
   useEffect(() => {
     let result = [...data];
-    
+
     // Apply filters
     Object.keys(filters).forEach(key => {
       const val = filters[key];
@@ -66,7 +66,7 @@ function CrudPage<T extends { [key: string]: any }>({ title, columns, fetchData,
         const field = key.replace('_end', '');
         result = result.filter(item => !item[field] || new Date(item[field]) <= new Date(val));
       } else {
-        result = result.filter(item => 
+        result = result.filter(item =>
           String(item[key]).toLowerCase().includes(String(val).toLowerCase())
         );
       }
@@ -77,7 +77,7 @@ function CrudPage<T extends { [key: string]: any }>({ title, columns, fetchData,
       result.sort((a, b) => {
         let aVal = a[sortConfig.key];
         let bVal = b[sortConfig.key];
-        
+
         // Handle nulls
         if (aVal === null || aVal === undefined) return 1;
         if (bVal === null || bVal === undefined) return -1;
@@ -126,7 +126,7 @@ function CrudPage<T extends { [key: string]: any }>({ title, columns, fetchData,
               <React.Fragment key={col.key}>
                 <div className="filter-group">
                   <label>{col.label} (Start)</label>
-                  <input 
+                  <input
                     type="date"
                     value={filters[`${col.key}_start`] || ''}
                     onChange={(e) => setFilters({ ...filters, [`${col.key}_start`]: e.target.value })}
@@ -134,7 +134,7 @@ function CrudPage<T extends { [key: string]: any }>({ title, columns, fetchData,
                 </div>
                 <div className="filter-group">
                   <label>{col.label} (End)</label>
-                  <input 
+                  <input
                     type="date"
                     value={filters[`${col.key}_end`] || ''}
                     onChange={(e) => setFilters({ ...filters, [`${col.key}_end`]: e.target.value })}
@@ -168,7 +168,7 @@ function CrudPage<T extends { [key: string]: any }>({ title, columns, fetchData,
           return (
             <div key={col.key} className="filter-group">
               <label>{col.label}</label>
-              <input 
+              <input
                 placeholder={`Search ${col.label}...`}
                 value={filters[col.key] || ''}
                 onChange={(e) => setFilters({ ...filters, [col.key]: e.target.value })}
@@ -186,8 +186,8 @@ function CrudPage<T extends { [key: string]: any }>({ title, columns, fetchData,
                 if (col.tableHidden) return null;
                 const isSorted = sortConfig?.key === col.key;
                 return (
-                  <th 
-                    key={col.key} 
+                  <th
+                    key={col.key}
                     onClick={() => handleSort(col.key)}
                     style={{ cursor: 'pointer', userSelect: 'none', position: 'relative', paddingRight: '20px' }}
                   >
@@ -207,8 +207,8 @@ function CrudPage<T extends { [key: string]: any }>({ title, columns, fetchData,
                   if (col.tableHidden) return null;
                   return (
                     <td key={col.key}>
-                      {col.type === 'date' && item[col.key] 
-                        ? new Date(item[col.key]).toLocaleDateString() 
+                      {col.type === 'date' && item[col.key]
+                        ? new Date(item[col.key]).toLocaleDateString()
                         : item[col.key]}
                     </td>
                   );
@@ -237,13 +237,13 @@ function CrudPage<T extends { [key: string]: any }>({ title, columns, fetchData,
                     <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                       {col.label}
                       {col.searchType && (
-                        <span 
-                          style={{ 
-                            fontSize: '0.65rem', 
-                            background: 'var(--accent-color)', 
-                            color: 'white', 
-                            padding: '2px 6px', 
-                            borderRadius: '4px', 
+                        <span
+                          style={{
+                            fontSize: '0.65rem',
+                            background: 'var(--accent-color)',
+                            color: 'white',
+                            padding: '2px 6px',
+                            borderRadius: '4px',
                             cursor: 'pointer',
                             textTransform: 'uppercase',
                             fontWeight: 'bold'
@@ -254,10 +254,10 @@ function CrudPage<T extends { [key: string]: any }>({ title, columns, fetchData,
                         </span>
                       )}
                     </label>
-                    <input 
+                    <input
                       type={col.type || 'text'}
-                      value={col.type === 'date' && selectedItem[col.key] 
-                        ? new Date(selectedItem[col.key]).toISOString().split('T')[0] 
+                      value={col.type === 'date' && selectedItem[col.key]
+                        ? new Date(selectedItem[col.key]).toISOString().split('T')[0]
                         : selectedItem[col.key] || ''}
                       onChange={(e) => {
                         let val: any = e.target.value;
@@ -283,32 +283,14 @@ function CrudPage<T extends { [key: string]: any }>({ title, columns, fetchData,
       )}
 
       {searchConfig && (
-        <SearchModal 
-          type={searchConfig.type} 
-          searchTerm="" 
-          onClose={() => setSearchConfig(null)} 
+        <SearchModal
+          type={searchConfig.type}
+          searchTerm=""
+          onClose={() => setSearchConfig(null)}
           onSelect={(item) => {
-            let id;
-            switch (searchConfig.type) {
-              case 'PO Item': id = item.po_item_id; break;
-              case 'Item': id = item.item_id; break;
-              case 'Vendor': id = item.vendor_id; break;
-              case 'PO': id = item.po_id; break;
-              case 'CI': id = item.ci_id; break;
-              case 'Container': id = item.container_id; break;
-              case 'BL': id = item.bl_id; break;
-              case 'GR': id = item.gr_id; break;
-              case 'Lot': id = item.lot_id; break;
-              default: id = item.id || item.uuid;
-            }
+            const id = item.vendor_id || item.po_id || item.ci_id || item.container_id || item.bl_id || item.id;
             if (selectedItem) {
-              const updates: any = { [searchConfig.field]: id };
-              if (searchConfig.type === 'PO Item') {
-                if (item.unit_price !== undefined) updates.unit_price = item.unit_price;
-                if (item.currency !== undefined) updates.currency = item.currency;
-                if (item.item_id !== undefined) updates.item_id = item.item_id;
-              }
-              setSelectedItem({ ...selectedItem, ...updates });
+              setSelectedItem({ ...selectedItem, [searchConfig.field]: id });
             }
             setSearchConfig(null);
           }}

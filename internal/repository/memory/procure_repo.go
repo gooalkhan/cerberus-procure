@@ -131,7 +131,7 @@ func (r *MemoryProcurementRepository) seed() {
 	r.aps[ap1.ID] = ap1
 
 	// Mock Goods Receipts
-	gr1 := models.GoodsReceipt{ID: 1, ContainerID: 1, BLID: 1, ReceiveDate: time.Now().AddDate(0, 0, -1), Remark: "First Shipment Arrived", UUID: "gr-uuid-1", CreatedAt: time.Now()}
+	gr1 := models.GoodsReceipt{ID: 1, ReceiveDate: time.Now().AddDate(0, 0, -1), Remark: "First Shipment Arrived", UUID: "gr-uuid-1", CreatedAt: time.Now()}
 	r.grs[gr1.ID] = gr1
 
 	// Mock Inventory Lots
