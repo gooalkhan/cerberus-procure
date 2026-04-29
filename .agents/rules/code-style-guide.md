@@ -30,3 +30,7 @@ This project is an **Isomorphic Go** application designed to share business logi
 - **WASM Mode**: Typically uses Mock DB or browser-based storage.
 - **Server Mode**: Uses SQLite.
 - Ensure repository implementations satisfy shared interfaces for both targets.
+
+## 6. Implementation and Testing Requirement
+- **Dual Reflection**: Whenever implementing a new feature or modifying existing logic, the changes MUST be reflected in BOTH the WASM bridge (`cmd/wasm/main.go` and mock repos) and the Server bridge (`cmd/server/main.go` and sqlite repos).
+- **Dual Verification**: Behavioral checks and testing MUST be verified on both WASM and Server modes to ensure parity and prevent divergence.

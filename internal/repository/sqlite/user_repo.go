@@ -37,6 +37,19 @@ func (r *SQLiteUserRepository) GetUserByUsername(username string) (*models.User,
 	return &u, nil
 }
 
+func (r *SQLiteUserRepository) GetUserByID(id int) (*models.User, error) {
+	var u models.User
+	err := r.db.QueryRow("SELECT id, username, password_hash, display_name, created_at, updated_at FROM users WHERE id = ?", id).
+		Scan(&u.ID, &u.Username, &u.PasswordHash, &u.DisplayName, &u.CreatedAt, &u.UpdatedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &u, nil
+}
+
 func (r *SQLiteUserRepository) CreateUser(user *models.User) error {
 	res, err := r.db.Exec("INSERT INTO users (username, password_hash, display_name) VALUES (?, ?, ?)",
 		user.Username, user.PasswordHash, user.DisplayName)

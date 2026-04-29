@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { User } from './api/authApi'
+import { User, getSession, logout } from './api/authApi'
 import { procureApi } from './api/procureApi'
 import Login from './components/Login'
 import Sidebar from './components/Sidebar'
@@ -10,11 +10,21 @@ import SearchModal from './components/SearchModal'
 function App() {
   const [user, setUser] = useState<User | null>(null)
   const [activeMenu, setActiveMenu] = useState('items')
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    getSession().then(u => {
+      if (u) setUser(u)
+      setLoading(false)
+    })
+  }, [])
 
   const handleLogin = async (u: User) => {
     await procureApi.seedData();
     setUser(u)
   }
+
+  if (loading) return null;
 
   if (!user) {
     return <Login onLogin={handleLogin} />
@@ -24,7 +34,7 @@ function App() {
     switch (activeMenu) {
       case 'items':
         return (
-          <CrudPage 
+          <CrudPage
             title="Item Master"
             columns={[
               { key: 'sku_code', label: 'SKU Code' },
@@ -41,7 +51,7 @@ function App() {
         )
       case 'vendors':
         return (
-          <CrudPage 
+          <CrudPage
             title="Vendor Master"
             columns={[
               { key: 'name', label: 'Name' },
@@ -58,7 +68,7 @@ function App() {
         )
       case 'pos':
         return (
-          <CrudPage 
+          <CrudPage
             title="Purchase Orders"
             columns={[
               { key: 'po_no', label: 'PO No' },
@@ -77,7 +87,7 @@ function App() {
         )
       case 'logistics':
         return (
-          <CrudPage 
+          <CrudPage
             title="Bookings"
             columns={[
               { key: 'container_no', label: 'Container No', formHidden: true },
@@ -120,7 +130,7 @@ function App() {
         )
       case 'bls':
         return (
-          <CrudPage 
+          <CrudPage
             title="BL Management"
             columns={[
               { key: 'bl_no', label: 'BL No' },
@@ -141,7 +151,7 @@ function App() {
         )
       case 'containers':
         return (
-          <CrudPage 
+          <CrudPage
             title="Container Master"
             columns={[
               { key: 'container_no', label: 'Container No' },
@@ -159,7 +169,7 @@ function App() {
         )
       case 'invoices':
         return (
-          <CrudPage 
+          <CrudPage
             title="Commercial Invoices"
             columns={[
               { key: 'ci_no', label: 'Invoice No' },
@@ -178,7 +188,7 @@ function App() {
         )
       case 'aps':
         return (
-          <CrudPage 
+          <CrudPage
             title="Account Payables"
             columns={[
               { key: 'ap_no', label: 'AP No' },
@@ -200,7 +210,7 @@ function App() {
         )
       case 'inventory':
         return (
-          <CrudPage 
+          <CrudPage
             title="Landed Goods"
             columns={[
               { key: 'container_id', label: 'Container ID', type: 'number', searchType: 'Container' },
@@ -237,7 +247,7 @@ function App() {
         )
       case 'allocations':
         return (
-          <CrudPage 
+          <CrudPage
             title="Cost Allocations"
             columns={[
               { key: 'allocation_date', label: 'Date', type: 'date' },
@@ -262,7 +272,7 @@ function App() {
           <div className="user-info">
             Welcome, <strong>{user?.display_name}</strong> ({user?.username})
           </div>
-          <button className="secondary" onClick={() => setUser(null)}>Logout</button>
+          <button className="secondary" onClick={logout}>Logout</button>
         </header>
         <div className="content-area">
           {renderContent()}
@@ -291,8 +301,8 @@ function APDetail({ ap, onChange }: { ap: any, onChange: (updated: any) => void 
       <div className="form-grid">
         <div className="form-group">
           <label>Allocation Type</label>
-          <select 
-            value={ap.allocation_type} 
+          <select
+            value={ap.allocation_type}
             onChange={e => onChange({ ...ap, allocation_type: e.target.value })}
           >
             {['Weight', 'Volume', 'Quantity', 'Value', 'Unit'].map(t => (
@@ -302,8 +312,8 @@ function APDetail({ ap, onChange }: { ap: any, onChange: (updated: any) => void 
         </div>
         <div className="form-group">
           <label>Reference Type</label>
-          <select 
-            value={ap.reference_type} 
+          <select
+            value={ap.reference_type}
             onChange={e => onChange({ ...ap, reference_type: e.target.value })}
           >
             {['PO', 'CI', 'Container', 'BL', 'GR', 'Lot'].map(t => (
@@ -314,13 +324,13 @@ function APDetail({ ap, onChange }: { ap: any, onChange: (updated: any) => void 
         <div className="form-group">
           <label>Reference Search</label>
           <div style={{ display: 'flex', gap: '0.5rem' }}>
-            <input 
-              type="text" 
+            <input
+              type="text"
               placeholder={`Search ${ap.reference_type}...`}
               value={refNo}
               onChange={e => setRefNo(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleOpenSearch()}
-          />
+            />
             <button type="button" className="secondary" onClick={handleOpenSearch}>Find UUID</button>
           </div>
         </div>
@@ -331,11 +341,11 @@ function APDetail({ ap, onChange }: { ap: any, onChange: (updated: any) => void 
       </div>
 
       {isSearchOpen && (
-        <SearchModal 
-          type={ap.reference_type} 
-          searchTerm={refNo} 
-          onClose={() => setIsSearchOpen(false)} 
-          onSelect={handleSelect} 
+        <SearchModal
+          type={ap.reference_type}
+          searchTerm={refNo}
+          onClose={() => setIsSearchOpen(false)}
+          onSelect={handleSelect}
         />
       )}
     </div>
@@ -383,7 +393,44 @@ function CIDetail({ ci }: { ci: any }) {
   return (
     <div style={{ marginTop: '2rem' }}>
       <div style={{ marginBottom: '2.5rem' }}>
-        <h3 style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <h3 style={{ marginBottom: '1.5rem' }}>Aggregated Loaded Items</h3>
+        <table className="sub-table">
+          <thead>
+            <tr>
+              <th>Item ID</th>
+              <th>Item Name</th>
+              <th>Total Qty</th>
+              <th>Total Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(!items || items.length === 0) ? (
+              <tr>
+                <td colSpan={4} style={{ textAlign: 'center', opacity: 0.6 }}>No items associated with this invoice.</td>
+              </tr>
+            ) : items.map((it, idx) => (
+              <tr key={idx}>
+                <td>{it.item_id}</td>
+                <td><strong>{it.item_name}</strong></td>
+                <td>{it.total_qty}</td>
+                <td>{it.amount.toLocaleString()} {it.currency}</td>
+              </tr>
+            ))}
+          </tbody>
+          {items && items.length > 0 && (
+            <tfoot>
+              <tr style={{ fontWeight: 'bold', background: 'rgba(255,255,255,0.05)' }}>
+                <td colSpan={2} style={{ textAlign: 'right' }}>Total:</td>
+                <td>{items.reduce((sum, it) => sum + it.total_qty, 0)}</td>
+                <td>{items.reduce((sum, it) => sum + it.amount, 0).toLocaleString()} {items[0]?.currency}</td>
+              </tr>
+            </tfoot>
+          )}
+        </table>
+      </div>
+
+      <div>
+        <h3 style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid #333', paddingTop: '1.5rem', marginBottom: '1.5rem' }}>
           Associated Account Payables
           <span style={{ fontSize: '0.8rem', opacity: 0.6 }}>Reference: {ci.ci_no}</span>
         </h3>
@@ -415,19 +462,19 @@ function CIDetail({ ci }: { ci: any }) {
         <div className="form-grid" style={{ background: 'rgba(255,255,255,0.03)', padding: '1.5rem', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.1)' }}>
           <div className="form-group">
             <label>AP No</label>
-            <input type="text" value={newAp.ap_no} onChange={e => setNewAp({...newAp, ap_no: e.target.value})} placeholder="e.g. AP-INV-001" />
+            <input type="text" value={newAp.ap_no} onChange={e => setNewAp({ ...newAp, ap_no: e.target.value })} placeholder="e.g. AP-INV-001" />
           </div>
           <div className="form-group">
             <label>Currency</label>
-            <input type="text" value={newAp.currency} onChange={e => setNewAp({...newAp, currency: e.target.value})} />
+            <input type="text" value={newAp.currency} onChange={e => setNewAp({ ...newAp, currency: e.target.value })} />
           </div>
           <div className="form-group">
             <label>Amount</label>
-            <input type="number" value={newAp.amount} onChange={e => setNewAp({...newAp, amount: Number(e.target.value)})} />
+            <input type="number" value={newAp.amount} onChange={e => setNewAp({ ...newAp, amount: Number(e.target.value) })} />
           </div>
           <div className="form-group">
             <label>Due Date</label>
-            <input type="date" value={newAp.due_date || ''} onChange={e => setNewAp({...newAp, due_date: e.target.value})} />
+            <input type="date" value={newAp.due_date || ''} onChange={e => setNewAp({ ...newAp, due_date: e.target.value })} />
           </div>
           <div className="form-group" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
             <label>&nbsp;</label>
@@ -435,41 +482,6 @@ function CIDetail({ ci }: { ci: any }) {
           </div>
         </div>
       </div>
-
-      <h3 style={{ borderTop: '1px solid #333', paddingTop: '1.5rem', marginBottom: '1.5rem' }}>Aggregated Loaded Items</h3>
-      <table className="sub-table">
-        <thead>
-          <tr>
-            <th>Item ID</th>
-            <th>Item Name</th>
-            <th>Total Qty</th>
-            <th>Total Amount</th>
-          </tr>
-        </thead>
-        <tbody>
-          {(!items || items.length === 0) ? (
-            <tr>
-              <td colSpan={4} style={{ textAlign: 'center', opacity: 0.6 }}>No items associated with this invoice.</td>
-            </tr>
-          ) : items.map((it, idx) => (
-            <tr key={idx}>
-              <td>{it.item_id}</td>
-              <td><strong>{it.item_name}</strong></td>
-              <td>{it.total_qty}</td>
-              <td>{it.amount.toLocaleString()} {it.currency}</td>
-            </tr>
-          ))}
-        </tbody>
-        {items && items.length > 0 && (
-          <tfoot>
-            <tr style={{ fontWeight: 'bold', background: 'rgba(255,255,255,0.05)' }}>
-              <td colSpan={2} style={{ textAlign: 'right' }}>Total:</td>
-              <td>{items.reduce((sum, it) => sum + it.total_qty, 0)}</td>
-              <td>{items.reduce((sum, it) => sum + it.amount, 0).toLocaleString()} {items[0]?.currency}</td>
-            </tr>
-          </tfoot>
-        )}
-      </table>
     </div>
   );
 }
@@ -636,11 +648,11 @@ function BookingFlow({ booking }: { booking: any }) {
   }, [booking]);
 
   const Step = ({ label, value, color }: { label: string, value: string, color: string }) => (
-    <div style={{ 
-      flex: 1, 
-      background: 'rgba(255,255,255,0.03)', 
-      padding: '1rem', 
-      borderRadius: '8px', 
+    <div style={{
+      flex: 1,
+      background: 'rgba(255,255,255,0.03)',
+      padding: '1rem',
+      borderRadius: '8px',
       borderLeft: `4px solid ${color}`,
       textAlign: 'center'
     }}>
@@ -733,8 +745,8 @@ function LandedGoodsDetail({ gr, onChange }: { gr: any, onChange: (updated: any)
           ) : lots.map((lot, idx) => (
             <tr key={idx}>
               <td>
-                <select 
-                  value={lot.container_item_id} 
+                <select
+                  value={lot.container_item_id}
                   onChange={e => handleUpdateLot(idx, 'container_item_id', Number(e.target.value))}
                   className="select-cell"
                   style={{ width: '100%', background: 'transparent', color: 'inherit', border: 'none', padding: '4px' }}
@@ -748,34 +760,34 @@ function LandedGoodsDetail({ gr, onChange }: { gr: any, onChange: (updated: any)
                 </select>
               </td>
               <td>
-                <input 
-                  type="text" 
-                  value={lot.lot_no} 
+                <input
+                  type="text"
+                  value={lot.lot_no}
                   onChange={e => handleUpdateLot(idx, 'lot_no', e.target.value)}
                   style={{ width: '100%', background: 'transparent', border: 'none', color: 'inherit' }}
                   placeholder="e.g. LOT-A01"
                 />
               </td>
               <td>
-                <input 
-                  type="date" 
-                  value={lot.expiry_date?.split('T')[0] || ''} 
+                <input
+                  type="date"
+                  value={lot.expiry_date?.split('T')[0] || ''}
                   onChange={e => handleUpdateLot(idx, 'expiry_date', e.target.value)}
                   style={{ width: '100%', background: 'transparent', border: 'none', color: 'inherit' }}
                 />
               </td>
               <td>
-                <input 
-                  type="number" 
-                  value={lot.qty} 
+                <input
+                  type="number"
+                  value={lot.qty}
                   onChange={e => handleUpdateLot(idx, 'qty', Number(e.target.value))}
                   style={{ width: '80px', background: 'transparent', border: 'none', color: 'inherit' }}
                 />
               </td>
               <td>
-                <input 
-                  type="text" 
-                  value={lot.remark} 
+                <input
+                  type="text"
+                  value={lot.remark}
                   onChange={e => handleUpdateLot(idx, 'remark', e.target.value)}
                   style={{ width: '100%', background: 'transparent', border: 'none', color: 'inherit' }}
                 />

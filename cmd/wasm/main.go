@@ -26,7 +26,28 @@ func login(this js.Value, args []js.Value) interface{} {
 				return
 			}
 			b, _ := json.Marshal(user)
+			js.Global().Get("localStorage").Call("setItem", "session_user", string(b))
 			resolve.Invoke(string(b))
+		}()
+		return nil
+	})
+
+	promiseClass := js.Global().Get("Promise")
+	return promiseClass.New(handler)
+}
+
+func getSession(this js.Value, args []js.Value) interface{} {
+	handler := js.FuncOf(func(this js.Value, promiseArgs []js.Value) interface{} {
+		resolve := promiseArgs[0]
+		reject := promiseArgs[1]
+
+		go func() {
+			userStr := js.Global().Get("localStorage").Call("getItem", "session_user")
+			if userStr.IsNull() || userStr.IsUndefined() || userStr.String() == "" {
+				reject.Invoke("No session")
+				return
+			}
+			resolve.Invoke(userStr.String())
 		}()
 		return nil
 	})
@@ -108,6 +129,7 @@ func main() {
 	authUC.Register("admin", "1234", "Administrator")
 
 	js.Global().Set("login", js.FuncOf(login))
+	js.Global().Set("getSession", js.FuncOf(getSession))
 	js.Global().Set("getTodos", js.FuncOf(getTodos))
 	js.Global().Set("addTodo", js.FuncOf(addTodo))
 	js.Global().Set("toggleTodo", js.FuncOf(toggleTodo))

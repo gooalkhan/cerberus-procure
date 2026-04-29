@@ -11,6 +11,7 @@ type TodoRepository interface {
 
 type UserRepository interface {
 	GetUserByUsername(username string) (*models.User, error)
+	GetUserByID(id int) (*models.User, error)
 	CreateUser(user *models.User) error
 }
 

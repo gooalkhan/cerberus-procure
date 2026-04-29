@@ -34,6 +34,11 @@ func (uc *AuthUseCase) Login(username, password string) (*models.User, error) {
 	return user, nil
 }
 
+// GetUserByID returns a user by their ID
+func (uc *AuthUseCase) GetUserByID(id int) (*models.User, error) {
+	return uc.userRepo.GetUserByID(id)
+}
+
 // Register creates a new user with a hashed password
 func (uc *AuthUseCase) Register(username, password, displayName string) (*models.User, error) {
 	// Check if user already exists

@@ -43,11 +43,28 @@ declare global {
 
 const isWasm = () => !!(window as any).procureApi;
 
+function fixDates(obj: any): any {
+  if (obj === null || typeof obj !== 'object') return obj;
+  if (Array.isArray(obj)) return obj.map(fixDates);
+  
+  const newObj = { ...obj };
+  for (const key in newObj) {
+    const val = newObj[key];
+    if (typeof val === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(val)) {
+      newObj[key] = `${val}T00:00:00Z`;
+    } else if (typeof val === 'object') {
+      newObj[key] = fixDates(val);
+    }
+  }
+  return newObj;
+}
+
 async function request<T>(path: string, method: string = 'GET', body?: any): Promise<T> {
+  const processedBody = body ? fixDates(body) : body;
   const res = await fetch(`/api${path}`, {
     method,
-    headers: body ? { 'Content-Type': 'application/json' } : undefined,
-    body: body ? JSON.stringify(body) : undefined,
+    headers: processedBody ? { 'Content-Type': 'application/json' } : undefined,
+    body: processedBody ? JSON.stringify(processedBody) : undefined,
   });
   if (!res.ok) throw new Error(await res.text());
   
@@ -71,8 +88,9 @@ export const procureApi = {
     return request<ItemMaster[]>('/items');
   },
   saveItem: async (item: ItemMaster): Promise<void> => {
-    if (isWasm()) return window.procureApi.saveItem(JSON.stringify(item));
-    return request('/items', 'POST', item);
+    const processed = fixDates(item);
+    if (isWasm()) return window.procureApi.saveItem(JSON.stringify(processed));
+    return request('/items', 'POST', processed);
   },
 
   // Vendors
@@ -81,8 +99,9 @@ export const procureApi = {
     return request<VendorMaster[]>('/vendors');
   },
   saveVendor: async (v: VendorMaster): Promise<void> => {
-    if (isWasm()) return window.procureApi.saveVendor(JSON.stringify(v));
-    return request('/vendors', 'POST', v);
+    const processed = fixDates(v);
+    if (isWasm()) return window.procureApi.saveVendor(JSON.stringify(processed));
+    return request('/vendors', 'POST', processed);
   },
 
   // Purchase Orders
@@ -91,8 +110,9 @@ export const procureApi = {
     return request<PurchaseOrder[]>('/pos');
   },
   savePurchaseOrder: async (p: PurchaseOrder): Promise<void> => {
-    if (isWasm()) return window.procureApi.savePurchaseOrder(JSON.stringify(p));
-    return request('/pos', 'POST', p);
+    const processed = fixDates(p);
+    if (isWasm()) return window.procureApi.savePurchaseOrder(JSON.stringify(processed));
+    return request('/pos', 'POST', processed);
   },
 
   // PO Items
@@ -101,8 +121,9 @@ export const procureApi = {
     return request<POItem[]>(`/pos/items?poId=${poId}`);
   },
   savePOItem: async (i: POItem): Promise<void> => {
-    if (isWasm()) return window.procureApi.savePOItem(JSON.stringify(i));
-    return request('/pos/items', 'POST', i);
+    const processed = fixDates(i);
+    if (isWasm()) return window.procureApi.savePOItem(JSON.stringify(processed));
+    return request('/pos/items', 'POST', processed);
   },
 
   // Invoices
@@ -115,8 +136,9 @@ export const procureApi = {
     return request<CIAggregatedItem[]>(`/invoices/items?ciId=${ciId}`);
   },
   saveCommercialInvoice: async (i: CommercialInvoice): Promise<void> => {
-    if (isWasm()) return window.procureApi.saveCommercialInvoice(JSON.stringify(i));
-    return request('/invoices', 'POST', i);
+    const processed = fixDates(i);
+    if (isWasm()) return window.procureApi.saveCommercialInvoice(JSON.stringify(processed));
+    return request('/invoices', 'POST', processed);
   },
 
   // AP
@@ -125,8 +147,9 @@ export const procureApi = {
     return request<AccountPayable[]>('/aps');
   },
   saveAccountPayable: async (i: AccountPayable): Promise<void> => {
-    if (isWasm()) return window.procureApi.saveAccountPayable(JSON.stringify(i));
-    return request('/aps', 'POST', i);
+    const processed = fixDates(i);
+    if (isWasm()) return window.procureApi.saveAccountPayable(JSON.stringify(processed));
+    return request('/aps', 'POST', processed);
   },
 
   // Containers
@@ -135,12 +158,14 @@ export const procureApi = {
     return request<Container[]>('/containers');
   },
   saveContainer: async (i: Container): Promise<void> => {
-    if (isWasm()) return window.procureApi.saveContainer(JSON.stringify(i));
-    return request('/containers', 'POST', i);
+    const processed = fixDates(i);
+    if (isWasm()) return window.procureApi.saveContainer(JSON.stringify(processed));
+    return request('/containers', 'POST', processed);
   },
   saveContainerItem: async (i: ContainerItem): Promise<void> => {
-    if (isWasm()) return window.procureApi.saveContainerItem(JSON.stringify(i));
-    return request('/containers/items', 'POST', i);
+    const processed = fixDates(i);
+    if (isWasm()) return window.procureApi.saveContainerItem(JSON.stringify(processed));
+    return request('/containers/items', 'POST', processed);
   },
   getContainerItemsByContainerID: async (containerId: number): Promise<ContainerItem[]> => {
     if (isWasm()) return JSON.parse(await window.procureApi.getContainerItemsByContainerID(containerId));
@@ -153,8 +178,9 @@ export const procureApi = {
     return request<BL[]>('/bls');
   },
   saveBL: async (i: BL): Promise<void> => {
-    if (isWasm()) return window.procureApi.saveBL(JSON.stringify(i));
-    return request('/bls', 'POST', i);
+    const processed = fixDates(i);
+    if (isWasm()) return window.procureApi.saveBL(JSON.stringify(processed));
+    return request('/bls', 'POST', processed);
   },
   getContainersByBLID: async (blId: number): Promise<Container[]> => {
     if (isWasm()) return JSON.parse(await window.procureApi.getContainersByBLID(blId));
@@ -171,8 +197,9 @@ export const procureApi = {
     return request<InventoryLot[]>(`/lots/gr?grId=${grId}`);
   },
   saveGoodsReceipt: async (i: GoodsReceipt): Promise<void> => {
-    if (isWasm()) return window.procureApi.saveGoodsReceipt(JSON.stringify(i));
-    return request('/grs', 'POST', i);
+    const processed = fixDates(i);
+    if (isWasm()) return window.procureApi.saveGoodsReceipt(JSON.stringify(processed));
+    return request('/grs', 'POST', processed);
   },
 
   // Inventory Lot
@@ -181,8 +208,9 @@ export const procureApi = {
     return request<InventoryLot[]>('/lots');
   },
   saveInventoryLot: async (i: InventoryLot): Promise<void> => {
-    if (isWasm()) return window.procureApi.saveInventoryLot(JSON.stringify(i));
-    return request('/lots', 'POST', i);
+    const processed = fixDates(i);
+    if (isWasm()) return window.procureApi.saveInventoryLot(JSON.stringify(processed));
+    return request('/lots', 'POST', processed);
   },
 
   // Cost Allocation
@@ -191,8 +219,9 @@ export const procureApi = {
     return request<CostAllocation[]>('/allocations');
   },
   saveCostAllocation: async (i: CostAllocation): Promise<void> => {
-    if (isWasm()) return window.procureApi.saveCostAllocation(JSON.stringify(i));
-    return request('/allocations', 'POST', i);
+    const processed = fixDates(i);
+    if (isWasm()) return window.procureApi.saveCostAllocation(JSON.stringify(processed));
+    return request('/allocations', 'POST', processed);
   },
 
   // Unified Views

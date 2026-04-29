@@ -35,3 +35,27 @@ export const login = async (username: string, password: string): Promise<User> =
   
   return res.json();
 };
+
+export const getSession = async (): Promise<User | null> => {
+  if (isWasm()) {
+    try {
+      const res = await (window as any).getSession();
+      return JSON.parse(res);
+    } catch (e) {
+      return null;
+    }
+  }
+  
+  const res = await fetch('/api/me');
+  if (!res.ok) return null;
+  return res.json();
+};
+
+export const logout = async () => {
+  if (isWasm()) {
+    localStorage.removeItem('session_user');
+  } else {
+    document.cookie = "session_id=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
+  }
+  window.location.reload();
+};

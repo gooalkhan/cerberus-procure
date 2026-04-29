@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { POItem, PurchaseOrder } from '../api/models';
 import { procureApi } from '../api/procureApi';
 
@@ -10,6 +10,8 @@ interface POItemDetailProps {
 const POItemDetail: React.FC<POItemDetailProps> = ({ po, onChange }) => {
   const [items, setItems] = useState<POItem[]>(po.items || []);
   const [loading, setLoading] = useState(false);
+  const [aps, setAps] = useState<any[]>([]);
+  const [newAp, setNewAp] = useState({ ap_no: '', currency: po.currency || 'USD', amount: 0, due_date: null as string | null });
 
   useEffect(() => {
     if (po.po_id && (!po.items || po.items.length === 0)) {
@@ -28,6 +30,38 @@ const POItemDetail: React.FC<POItemDetailProps> = ({ po, onChange }) => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const loadAPs = useCallback(() => {
+    procureApi.getAccountPayables().then(list => {
+      setAps(list.filter(ap => ap.reference_uuid === po.uuid && ap.reference_type === 'PO'));
+    });
+  }, [po.uuid]);
+
+  useEffect(() => {
+    if (po.uuid) {
+      loadAPs();
+    }
+  }, [po.uuid, loadAPs]);
+
+  const handleAddAp = async () => {
+    if (!newAp.ap_no || !newAp.amount || !newAp.due_date) {
+      alert("Please fill in all AP fields");
+      return;
+    }
+    await procureApi.saveAccountPayable({
+      ...newAp,
+      ap_id: 0,
+      vendor_id: po.vendor_id,
+      reference_uuid: po.uuid,
+      reference_type: 'PO',
+      status: 'unpaid',
+      allocation_status: 'Open',
+      allocation_type: 'Value',
+      local_amount: newAp.amount
+    } as any);
+    setNewAp({ ap_no: '', currency: po.currency || 'USD', amount: 0, due_date: null });
+    loadAPs();
   };
 
   const updateParent = (newItems: POItem[]) => {
@@ -159,6 +193,68 @@ const POItemDetail: React.FC<POItemDetailProps> = ({ po, onChange }) => {
           </table>
         </div>
       )}
+
+      {/* Associated Account Payables Section */}
+      <div style={{ marginTop: '3rem' }}>
+        <h3 style={{ 
+          display: 'flex', 
+          justifyContent: 'space-between', 
+          alignItems: 'center',
+          borderTop: '1px solid var(--border-color)', 
+          paddingTop: '1.5rem', 
+          marginBottom: '1.5rem' 
+        }}>
+          Associated Account Payables
+          <span style={{ fontSize: '0.8rem', opacity: 0.6, fontWeight: 400 }}>Reference: {po.po_no}</span>
+        </h3>
+        <table className="sub-table" style={{ marginBottom: '1.5rem' }}>
+          <thead>
+            <tr>
+              <th>AP No</th>
+              <th>Currency</th>
+              <th>Amount</th>
+              <th>Due Date</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {aps.length === 0 ? (
+              <tr><td colSpan={5} style={{ textAlign: 'center', opacity: 0.6 }}>No APs linked to this PO.</td></tr>
+            ) : aps.map((ap, idx) => (
+              <tr key={idx}>
+                <td>{ap.ap_no}</td>
+                <td>{ap.currency}</td>
+                <td>{ap.amount.toLocaleString()}</td>
+                <td>{ap.due_date?.split('T')[0]}</td>
+                <td><span className={`badge ${ap.status}`}>{ap.status}</span></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+
+        <div className="form-grid" style={{ background: 'rgba(255,255,255,0.03)', padding: '1.5rem', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.1)' }}>
+          <div className="form-group">
+            <label>AP No</label>
+            <input type="text" value={newAp.ap_no} onChange={e => setNewAp({ ...newAp, ap_no: e.target.value })} placeholder="e.g. AP-PO-001" />
+          </div>
+          <div className="form-group">
+            <label>Currency</label>
+            <input type="text" value={newAp.currency} onChange={e => setNewAp({ ...newAp, currency: e.target.value })} />
+          </div>
+          <div className="form-group">
+            <label>Amount</label>
+            <input type="number" value={newAp.amount} onChange={e => setNewAp({ ...newAp, amount: Number(e.target.value) })} />
+          </div>
+          <div className="form-group">
+            <label>Due Date</label>
+            <input type="date" value={newAp.due_date || ''} onChange={e => setNewAp({ ...newAp, due_date: e.target.value })} />
+          </div>
+          <div className="form-group" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
+            <label>&nbsp;</label>
+            <button className="btn-success" onClick={handleAddAp} style={{ width: '100%', height: '38px' }}>Add AP to PO</button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 };

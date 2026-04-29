@@ -30,6 +30,17 @@ func (r *MemoryUserRepository) GetUserByUsername(username string) (*models.User,
 	return user, nil
 }
 
+func (r *MemoryUserRepository) GetUserByID(id int) (*models.User, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, u := range r.users {
+		if u.ID == id {
+			return u, nil
+		}
+	}
+	return nil, nil
+}
+
 func (r *MemoryUserRepository) CreateUser(user *models.User) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()

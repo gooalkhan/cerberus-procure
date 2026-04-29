@@ -11,8 +11,12 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 )
+
+var sessions = make(map[string]int)
+var sessionsMu sync.RWMutex
 
 var apiLogger *log.Logger
 var serverLogger *log.Logger
@@ -57,6 +61,46 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 	user, err := authUC.Login(input.Username, input.Password)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	// Create session
+	sessionId := fmt.Sprintf("%d_%d", user.ID, time.Now().UnixNano())
+	sessionsMu.Lock()
+	sessions[sessionId] = user.ID
+	sessionsMu.Unlock()
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     "session_id",
+		Value:    sessionId,
+		Path:     "/",
+		HttpOnly: true,
+		Expires:  time.Now().Add(24 * time.Hour),
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(user)
+}
+
+func meHandler(w http.ResponseWriter, r *http.Request) {
+	cookie, err := r.Cookie("session_id")
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	sessionsMu.RLock()
+	userId, ok := sessions[cookie.Value]
+	sessionsMu.RUnlock()
+
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	user, err := authUC.GetUserByID(userId)
+	if err != nil || user == nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 
@@ -163,6 +207,27 @@ func corsMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		cookie, err := r.Cookie("session_id")
+		if err != nil {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		sessionsMu.RLock()
+		_, ok := sessions[cookie.Value]
+		sessionsMu.RUnlock()
+
+		if !ok {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		next(w, r)
+	}
+}
+
 func main() {
 	initLogger()
 	todoRepo, err := sqlite.NewSQLiteTodoRepository("todos.db")
@@ -189,15 +254,16 @@ func main() {
 
 	// API 핸들러
 	mux.HandleFunc("/api/login", corsMiddleware(loginHandler))
+	mux.HandleFunc("/api/me", corsMiddleware(authMiddleware(meHandler)))
 	
-	mux.HandleFunc("/api/seed", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/seed", corsMiddleware(authMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
 			procureUC.SeedData()
 			w.WriteHeader(http.StatusOK)
 		}
-	}))
+	})))
 	// Items API
-	mux.HandleFunc("/api/items", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/items", corsMiddleware(authMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method == http.MethodGet {
 			items, err := procureUC.GetItems()
@@ -217,10 +283,10 @@ func main() {
 			}
 			w.WriteHeader(http.StatusOK)
 		}
-	}))
+	})))
 
 	// Vendors API
-	mux.HandleFunc("/api/vendors", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/vendors", corsMiddleware(authMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method == http.MethodGet {
 			list, _ := procureUC.GetVendors()
@@ -231,10 +297,10 @@ func main() {
 			procureUC.SaveVendor(&i)
 			w.WriteHeader(http.StatusOK)
 		}
-	}))
+	})))
 
 	// PO API
-	mux.HandleFunc("/api/pos", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/pos", corsMiddleware(authMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method == http.MethodGet {
 			list, _ := procureUC.GetPurchaseOrders()
@@ -245,10 +311,10 @@ func main() {
 			procureUC.SavePurchaseOrder(&i)
 			w.WriteHeader(http.StatusOK)
 		}
-	}))
+	})))
 
 	// PO Items API
-	mux.HandleFunc("/api/pos/items", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/pos/items", corsMiddleware(authMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method == http.MethodGet {
 			poIDStr := r.URL.Query().Get("poId")
@@ -262,10 +328,10 @@ func main() {
 			procureUC.SavePOItem(&i)
 			w.WriteHeader(http.StatusOK)
 		}
-	}))
+	})))
 
 	// Invoices API
-	mux.HandleFunc("/api/invoices", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/invoices", corsMiddleware(authMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method == http.MethodGet {
 			list, _ := procureUC.GetCommercialInvoices()
@@ -276,9 +342,9 @@ func main() {
 			procureUC.SaveCommercialInvoice(&i)
 			w.WriteHeader(http.StatusOK)
 		}
-	}))
+	})))
 
-	mux.HandleFunc("/api/invoices/items", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/invoices/items", corsMiddleware(authMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method == http.MethodGet {
 			ciIDStr := r.URL.Query().Get("ciId")
@@ -287,10 +353,10 @@ func main() {
 			list, _ := procureUC.GetCIAggregatedItems(ciID)
 			json.NewEncoder(w).Encode(list)
 		}
-	}))
+	})))
 
 	// AP API
-	mux.HandleFunc("/api/aps", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/aps", corsMiddleware(authMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method == http.MethodGet {
 			list, _ := procureUC.GetAccountPayables()
@@ -309,10 +375,10 @@ func main() {
 			}
 			w.WriteHeader(http.StatusOK)
 		}
-	}))
+	})))
 
 	// Containers API
-	mux.HandleFunc("/api/containers", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/containers", corsMiddleware(authMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method == http.MethodGet {
 			list, _ := procureUC.GetContainers()
@@ -323,9 +389,9 @@ func main() {
 			procureUC.SaveContainer(&i)
 			w.WriteHeader(http.StatusOK)
 		}
-	}))
+	})))
 
-	mux.HandleFunc("/api/containers/items", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/containers/items", corsMiddleware(authMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method == http.MethodGet {
 			cIDStr := r.URL.Query().Get("containerId")
@@ -339,9 +405,9 @@ func main() {
 			procureUC.SaveContainerItem(&i)
 			w.WriteHeader(http.StatusOK)
 		}
-	}))
+	})))
 
-	mux.HandleFunc("/api/containers/bl", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/containers/bl", corsMiddleware(authMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method == http.MethodGet {
 			blIDStr := r.URL.Query().Get("blId")
@@ -350,10 +416,10 @@ func main() {
 			list, _ := procureUC.GetContainersByBLID(blID)
 			json.NewEncoder(w).Encode(list)
 		}
-	}))
+	})))
 
 	// BL API
-	mux.HandleFunc("/api/bls", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/bls", corsMiddleware(authMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method == http.MethodGet {
 			list, _ := procureUC.GetBLs()
@@ -372,10 +438,10 @@ func main() {
 			}
 			w.WriteHeader(http.StatusOK)
 		}
-	}))
+	})))
 
 	// GR API
-	mux.HandleFunc("/api/grs", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/grs", corsMiddleware(authMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method == http.MethodGet {
 			list, _ := procureUC.GetGoodsReceipts()
@@ -394,10 +460,10 @@ func main() {
 			}
 			w.WriteHeader(http.StatusOK)
 		}
-	}))
+	})))
 
 	// Lots API
-	mux.HandleFunc("/api/lots", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/lots", corsMiddleware(authMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method == http.MethodGet {
 			list, _ := procureUC.GetInventoryLots()
@@ -416,9 +482,9 @@ func main() {
 			}
 			w.WriteHeader(http.StatusOK)
 		}
-	}))
+	})))
 
-	mux.HandleFunc("/api/lots/gr", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/lots/gr", corsMiddleware(authMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method == http.MethodGet {
 			grIDStr := r.URL.Query().Get("grId")
@@ -427,10 +493,10 @@ func main() {
 			list, _ := procureUC.GetInventoryLotsByGRID(grID)
 			json.NewEncoder(w).Encode(list)
 		}
-	}))
+	})))
 
 	// Allocations API
-	mux.HandleFunc("/api/allocations", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/allocations", corsMiddleware(authMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method == http.MethodGet {
 			list, _ := procureUC.GetCostAllocations()
@@ -449,10 +515,10 @@ func main() {
 			}
 			w.WriteHeader(http.StatusOK)
 		}
-	}))
+	})))
 
 	// Bookings API
-	mux.HandleFunc("/api/bookings", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/bookings", corsMiddleware(authMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method == http.MethodGet {
 			list, err := procureUC.GetBookings()
@@ -461,9 +527,9 @@ func main() {
 			}
 			json.NewEncoder(w).Encode(list)
 		}
-	}))
+	})))
 
-	mux.HandleFunc("/api/todos", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/todos", corsMiddleware(authMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.Method {
 		case http.MethodGet:
@@ -473,9 +539,9 @@ func main() {
 		default:
 			w.WriteHeader(http.StatusMethodNotAllowed)
 		}
-	}))
-	mux.HandleFunc("/api/todos/toggle", corsMiddleware(toggleTodoHandler))
-	mux.HandleFunc("/api/todos/delete", corsMiddleware(deleteTodoHandler))
+	})))
+	mux.HandleFunc("/api/todos/toggle", corsMiddleware(authMiddleware(toggleTodoHandler)))
+	mux.HandleFunc("/api/todos/delete", corsMiddleware(authMiddleware(deleteTodoHandler)))
 
 	// 프론트엔드 정적 파일 서빙
 	distFS, _ := fs.Sub(frontendAssets, "dist")
