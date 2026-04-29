@@ -40,10 +40,16 @@ const SearchModal: React.FC<SearchModalProps> = ({
         case 'Item': data = await procureApi.getItems(); break;
         case 'PO Item': 
           const pos = await procureApi.getPurchaseOrders();
+          const bookings = await procureApi.getBookings();
           const allItems: any[] = [];
           for (const po of pos) {
             const items = await procureApi.getPOItems(po.po_id);
-            allItems.push(...items.map(it => ({ ...it, po_no: po.po_no, id: it.po_item_id })));
+            allItems.push(...items.map(it => {
+              const bookedQty = bookings
+                .filter((b: any) => b.po_item_id === it.po_item_id)
+                .reduce((sum: number, b: any) => sum + (b.load_qty || 0), 0);
+              return { ...it, po_no: po.po_no, currency: po.currency, id: it.po_item_id, booked_qty: bookedQty };
+            }));
           }
           data = allItems;
           break;
@@ -130,7 +136,7 @@ const SearchModal: React.FC<SearchModalProps> = ({
                       case 'Lot': no = item.lot_no; info = `Qty: ${item.qty}`; break;
                       case 'Vendor': no = item.name; info = `Reg: ${item.business_reg_no}`; break;
                       case 'Item': no = item.sku_code; info = item.name; break;
-                      case 'PO Item': no = `${item.po_no} - Item ${item.item_id}`; info = `Qty: ${item.po_qty} / ${item.status}`; break;
+                      case 'PO Item': no = `${item.po_no} - Item ${item.item_id}`; info = `Booked: ${item.booked_qty} / Total: ${item.po_qty}`; break;
                     }
                     return (
                       <tr key={idx} style={{ cursor: 'pointer' }} onClick={() => onSelect(item)}>

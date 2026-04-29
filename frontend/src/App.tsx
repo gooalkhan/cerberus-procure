@@ -99,9 +99,11 @@ function App() {
               { key: 'bl_id', label: 'BL ID', type: 'number', tableHidden: true, searchType: 'BL' },
               { key: 'po_item_id', label: 'PO Item ID', type: 'number', tableHidden: true, searchType: 'PO Item' },
               { key: 'ci_id', label: 'CI ID', type: 'number', tableHidden: true, searchType: 'CI' },
-              { key: 'item_id', label: 'Item ID', type: 'number', tableHidden: true, searchType: 'Item' },
+              { key: 'item_id', label: 'Item ID', type: 'number', tableHidden: true, formHidden: true, searchType: 'Item' },
               { key: 'item_name', label: 'Item Name', formHidden: true },
               { key: 'divider_1', label: '', divider: true },
+              { key: 'unit_price', label: 'Unit Price', type: 'number', tableHidden: true },
+              { key: 'currency', label: 'Currency', tableHidden: true },
               { key: 'load_qty', label: 'Load Qty', type: 'number', filterType: 'none' },
               { key: 'cbm', label: 'CBM', type: 'number', formHidden: true },
               { key: 'remark', label: 'Remark', fullWidth: true },
@@ -626,11 +628,16 @@ function BookingFlow({ booking }: { booking: any }) {
     const load = async () => {
       const data: any = {};
       if (booking.po_item_id) {
-        const poItem = await procureApi.getPOItems(0); // Mock/Generic fetch
-        // In a real app, we'd have a specific "getPOByItemID" or similar
         const pos = await procureApi.getPurchaseOrders();
-        const po = pos.find(p => p.po_id === booking.po_id); // Assuming po_id is in booking
-        data.po_no = po?.po_no || 'PO-' + booking.po_item_id;
+        let foundPoNo = 'PO-' + booking.po_item_id;
+        for (const p of pos) {
+          const items = await procureApi.getPOItems(p.po_id);
+          if (items.some((i: any) => i.po_item_id === booking.po_item_id)) {
+            foundPoNo = p.po_no;
+            break;
+          }
+        }
+        data.po_no = foundPoNo;
       }
       if (booking.ci_id) {
         const cis = await procureApi.getCommercialInvoices();
