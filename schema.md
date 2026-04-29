@@ -16,7 +16,7 @@
 | **Purchase_Order** | PO_ID (PK), PO_Date (NN), PO_No (UK, NN), Vendor_ID (FK, NN), Currency (NN), Total_Amount (NN), Status (Default 'Open'), Remark, Created_By, Created_At (Default), Updated_By, Updated_At (Default), UUID (UK, NN) | 수입 발주 기본 정보. Status: Open, Closed |
 | **PO_Item** | PO_Item_ID (PK), PO_ID (FK, NN), Item_ID (FK, NN), PO_Qty (>0), Unit_Price (NN), Status(Default 'Not Shipped'), Remark, Created_By, Created_At (Default), Updated_By, Updated_At (Default) | 발주 품목 정보. Status: Shipped, Partially Shipped, Not Shipped, Cancelled. **Trigger**: 모든 품목이 Shipped/Cancelled이면 PO를 Closed로, 하나라도 미완료면 Open으로 자동 변경. |
 | **Commercial_Invoice** | CI_ID (PK), CI_No (UK, NN), Invoice_Date (NN), Vendor_ID (FK, NN), Currency (NN), Total_Amount (NN), Status, Remark, Created_By, Created_At (Default), Updated_By, Updated_At (Default), UUID (UK, NN)| 상업 송장 기본 정보. Status: Draft, Open, Closed |
-| **Account_Payable** | AP_ID (PK), Vendor_ID (FK, NN), AP_No (UK, NN), Amount (NN), Currency (NN), Local_Amount, Allocation_Type (Check), Reference_UUID, Reference_Type, Due_Date, Date_of_Payment, Allocation_Status, Remark, Created_By, Created_At (Default), Updated_By, Updated_At (Default), UUID (UK, NN) | AP 통합 관리. Status: Paid, Unpaid |Allocation_Type: Amount, Quantity, CBM, Weight, lot, item|
+| **Account_Payable** | AP_ID (PK), Vendor_ID (FK, NN), AP_No (UK, NN), Amount (NN), Currency (NN), Local_Amount, Allocation_Type (Check), Reference_UUID, Reference_Type, Due_Date, Date_of_Payment, Allocation_Status, Remark, Created_By, Created_At (Default), Updated_By, Updated_At (Default), UUID (UK, NN) | AP 통합 관리. Status: Paid, Unpaid \|Allocation_Type: Weight, Volume, Quantity, Value, Unit|
 
 ## 3. 물류 및 선적 관리 (Logistics & Shipping)
 N:N:N 아이템 매핑을 통해 복잡한 혼적 상황을 해결합니다.
@@ -33,7 +33,7 @@ N:N:N 아이템 매핑을 통해 복잡한 혼적 상황을 해결합니다.
 | Table | Columns | Description |
 | :--- | :--- | :--- |
 | **Goods_Receipt** | GR_ID (PK), Container_ID (FK, NN), BL_ID (FK, NN), Receive_Date (NN), Remark, Created_By, UUID (UK, NN) | 컨테이너 입고 기록. |
-| **Inventory_Lot** | Lot_ID (PK), GR_ID (FK, NN), Container_Item_ID (FK, NN), Lot_No (NN), Expiry_Date (Nullable), Qty (>=0), Landed_Cost_Per_Unit, Quarantine_Status, Quarantine_Remark, Remark, UUID (UK, NN) | 재고 최소 단위. |
+| **Inventory_Lot** | Lot_ID (PK), GR_ID (FK, NN), Container_Item_ID (FK, NN), Lot_No (NN), Expiry_Date (Nullable), Qty (NN), Landed_Cost_Per_Unit, Quarantine_Status, Quarantine_Remark, Remark, UUID (UK, NN) | 재고 최소 단위. |
 
 ## 5. 랜딩 코스트 부대비용 (Landing Cost)
 5대 배분 기준에 따라 상위 단위의 비용을 로트로 자동 안분합니다.

@@ -185,7 +185,7 @@ func migrateProcurement(db *sql.DB) error {
 			GR_ID INTEGER NOT NULL,
 			Container_Item_ID INTEGER NOT NULL,
 			Lot_No TEXT NOT NULL,
-			Expiry_Date DATETIME NOT NULL,
+			Expiry_Date DATETIME,
 			Qty REAL NOT NULL,
 			Landed_Cost_Per_Unit REAL,
 			Quarantine_Status TEXT,
@@ -666,14 +666,18 @@ func (r *SQLiteProcurementRepository) GetInventoryLots() ([]models.InventoryLot,
 	list := []models.InventoryLot{}
 	for rows.Next() {
 		var i models.InventoryLot
-		rows.Scan(&i.ID, &i.GRID, &i.ContainerItemID, &i.LotNo, &i.ExpiryDate, &i.Qty, &i.LandedCostPerUnit, &i.QuarantineStatus, &i.QuarantineRemark, &i.Remark, &i.UUID)
+		var expiryDate *time.Time
+		rows.Scan(&i.ID, &i.GRID, &i.ContainerItemID, &i.LotNo, &expiryDate, &i.Qty, &i.LandedCostPerUnit, &i.QuarantineStatus, &i.QuarantineRemark, &i.Remark, &i.UUID)
+		if expiryDate != nil {
+			i.ExpiryDate = *expiryDate
+		}
 		list = append(list, i)
 	}
 	return list, nil
 }
 
 func (r *SQLiteProcurementRepository) GetInventoryLotsByGRID(grID int) ([]models.InventoryLot, error) {
-	rows, err := r.db.Query("SELECT Lot_ID, GR_ID, Container_Item_ID, Lot_No, Expiry_Date, IFNULL(Qty, 0), IFNULL(Landed_Cost_Per_Unit, 0), IFNULL(Quarantine_Status, ''), IFNULL(Remark, ''), UUID FROM Inventory_Lot WHERE GR_ID = ?", grID)
+	rows, err := r.db.Query("SELECT Lot_ID, GR_ID, Container_Item_ID, Lot_No, Expiry_Date, IFNULL(Qty, 0), IFNULL(Landed_Cost_Per_Unit, 0), IFNULL(Quarantine_Status, ''), IFNULL(Quarantine_Remark, ''), IFNULL(Remark, ''), UUID FROM Inventory_Lot WHERE GR_ID = ?", grID)
 	if err != nil {
 		return nil, err
 	}
@@ -681,10 +685,10 @@ func (r *SQLiteProcurementRepository) GetInventoryLotsByGRID(grID int) ([]models
 	list := []models.InventoryLot{}
 	for rows.Next() {
 		var i models.InventoryLot
-		var expiryStr *string
-		rows.Scan(&i.ID, &i.GRID, &i.ContainerItemID, &i.LotNo, &expiryStr, &i.Qty, &i.LandedCostPerUnit, &i.QuarantineStatus, &i.Remark, &i.UUID)
-		if expiryStr != nil {
-			i.ExpiryDate, _ = time.Parse("2006-01-02", *expiryStr)
+		var expiryDate *time.Time
+		rows.Scan(&i.ID, &i.GRID, &i.ContainerItemID, &i.LotNo, &expiryDate, &i.Qty, &i.LandedCostPerUnit, &i.QuarantineStatus, &i.QuarantineRemark, &i.Remark, &i.UUID)
+		if expiryDate != nil {
+			i.ExpiryDate = *expiryDate
 		}
 		list = append(list, i)
 	}
@@ -694,7 +698,7 @@ func (r *SQLiteProcurementRepository) GetInventoryLotsByGRID(grID int) ([]models
 func (r *SQLiteProcurementRepository) SaveInventoryLot(i *models.InventoryLot) error {
 	if i.ID == 0 {
 		res, err := r.db.Exec("INSERT INTO Inventory_Lot (GR_ID, Container_Item_ID, Lot_No, Expiry_Date, Qty, Landed_Cost_Per_Unit, Quarantine_Status, Quarantine_Remark, Remark, UUID) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-			i.GRID, i.ContainerItemID, i.LotNo, i.ExpiryDate, i.Qty, i.LandedCostPerUnit, i.QuarantineStatus, i.QuarantineRemark, i.Remark, i.UUID)
+			i.GRID, i.ContainerItemID, i.LotNo, nullIfZero(i.ExpiryDate), i.Qty, i.LandedCostPerUnit, i.QuarantineStatus, i.QuarantineRemark, i.Remark, i.UUID)
 		if err != nil {
 			return err
 		}
@@ -703,7 +707,7 @@ func (r *SQLiteProcurementRepository) SaveInventoryLot(i *models.InventoryLot) e
 		return nil
 	}
 	_, err := r.db.Exec("UPDATE Inventory_Lot SET GR_ID=?, Container_Item_ID=?, Lot_No=?, Expiry_Date=?, Qty=?, Landed_Cost_Per_Unit=?, Quarantine_Status=?, Quarantine_Remark=?, Remark=? WHERE Lot_ID=?",
-		i.GRID, i.ContainerItemID, i.LotNo, i.ExpiryDate, i.Qty, i.LandedCostPerUnit, i.QuarantineStatus, i.QuarantineRemark, i.Remark, i.ID)
+		i.GRID, i.ContainerItemID, i.LotNo, nullIfZero(i.ExpiryDate), i.Qty, i.LandedCostPerUnit, i.QuarantineStatus, i.QuarantineRemark, i.Remark, i.ID)
 	return err
 }
 
