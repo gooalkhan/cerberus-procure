@@ -103,7 +103,7 @@ type AccountPayable struct {
 	LocalAmount      float64   `json:"local_amount"`
 	AllocationType   string    `json:"allocation_type"` // Weight, Volume, Quantity, Value, Unit
 	ReferenceUUID    string    `json:"reference_uuid"`
-	ReferenceType    string    `json:"reference_type"` // BL, Container, PO, CI, GR, Lot
+	ReferenceType    string    `json:"reference_type"` // BL, Container, PO, CI, GR, Lot, ContainerItem
 	DueDate          time.Time `json:"due_date"`
 	DateOfPayment    time.Time `json:"date_of_payment"`
 	Status           string    `json:"status"` // paid, unpaid
@@ -142,6 +142,7 @@ type ContainerItem struct {
 	GrossWeight float64 `json:"gross_weight"`
 	NetWeight   float64 `json:"net_weight"`
 	CBM         float64 `json:"cbm"`
+	UUID        string  `json:"uuid"`
 	Remark      string  `json:"remark"`
 }
 

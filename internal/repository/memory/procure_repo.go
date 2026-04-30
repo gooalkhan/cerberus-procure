@@ -113,11 +113,13 @@ func (r *MemoryProcurementRepository) seed() {
 		ID: 1, ContainerID: 1, BLID: 1, CIID: 1, POItemID: 1, ItemID: 1, 
 		LoadQty: 100, UnitPrice: 15.5, Currency: "USD",
 		GrossWeight: 1050, NetWeight: 1000, CBM: 5.0,
+		UUID: "cont-item-uuid-1",
 	}
 	ci2 := models.ContainerItem{
 		ID: 2, ContainerID: 2, BLID: 1, CIID: 1, POItemID: 2, ItemID: 2, 
 		LoadQty: 50, UnitPrice: 8.0, Currency: "USD",
 		GrossWeight: 260, NetWeight: 250, CBM: 1.5,
+		UUID: "cont-item-uuid-2",
 	}
 	r.containerItems[c1.ID] = append(r.containerItems[c1.ID], ci1)
 	r.containerItems[c2.ID] = append(r.containerItems[c2.ID], ci2)

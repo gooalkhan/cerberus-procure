@@ -171,6 +171,9 @@ func (uc *ProcurementUseCase) GetContainerItemsByContainerID(containerID int) ([
 }
 
 func (uc *ProcurementUseCase) SaveContainerItem(item *models.ContainerItem) error {
+	if item.UUID == "" {
+		item.UUID = uuid.New().String()
+	}
 	return uc.repo.SaveContainerItem(item)
 }
 

@@ -105,6 +105,7 @@ export interface ContainerItem {
   gross_weight: number;
   net_weight: number;
   cbm: number;
+  uuid: string;
   remark: string;
 }
 

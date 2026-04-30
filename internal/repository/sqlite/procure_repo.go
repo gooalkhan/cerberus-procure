@@ -148,6 +148,7 @@ func migrateProcurement(db *sql.DB) error {
 			Gross_Weight REAL,
 			Net_Weight REAL,
 			Cbm REAL,
+			UUID TEXT UNIQUE NOT NULL,
 			Remark TEXT,
 			FOREIGN KEY (PO_Item_ID) REFERENCES PO_Item(PO_Item_ID),
 			FOREIGN KEY (Container_ID) REFERENCES Container(Container_ID),
@@ -745,7 +746,7 @@ func (r *SQLiteProcurementRepository) SaveCostAllocation(ca *models.CostAllocati
 
 // Container Items
 func (r *SQLiteProcurementRepository) GetContainerItemsByContainerID(containerID int) ([]models.ContainerItem, error) {
-	rows, err := r.db.Query("SELECT Container_Item_ID, PO_Item_ID, IFNULL(Container_ID, 0), IFNULL(CI_ID, 0), IFNULL(BL_ID, 0), Item_ID, IFNULL(Unit_Price, 0), IFNULL(Currency, ''), IFNULL(Load_Qty, 0), IFNULL(Gross_Weight, 0), IFNULL(Net_Weight, 0), IFNULL(Cbm, 0), IFNULL(Remark, '') FROM Container_Item WHERE Container_ID = ?", containerID)
+	rows, err := r.db.Query("SELECT Container_Item_ID, PO_Item_ID, IFNULL(Container_ID, 0), IFNULL(CI_ID, 0), IFNULL(BL_ID, 0), Item_ID, IFNULL(Unit_Price, 0), IFNULL(Currency, ''), IFNULL(Load_Qty, 0), IFNULL(Gross_Weight, 0), IFNULL(Net_Weight, 0), IFNULL(Cbm, 0), IFNULL(UUID, ''), IFNULL(Remark, '') FROM Container_Item WHERE Container_ID = ?", containerID)
 	if err != nil {
 		return nil, err
 	}
@@ -753,7 +754,7 @@ func (r *SQLiteProcurementRepository) GetContainerItemsByContainerID(containerID
 	list := []models.ContainerItem{}
 	for rows.Next() {
 		var i models.ContainerItem
-		err := rows.Scan(&i.ID, &i.POItemID, &i.ContainerID, &i.CIID, &i.BLID, &i.ItemID, &i.UnitPrice, &i.Currency, &i.LoadQty, &i.GrossWeight, &i.NetWeight, &i.CBM, &i.Remark)
+		err := rows.Scan(&i.ID, &i.POItemID, &i.ContainerID, &i.CIID, &i.BLID, &i.ItemID, &i.UnitPrice, &i.Currency, &i.LoadQty, &i.GrossWeight, &i.NetWeight, &i.CBM, &i.UUID, &i.Remark)
 		if err != nil {
 			return nil, err
 		}
@@ -765,11 +766,11 @@ func (r *SQLiteProcurementRepository) GetContainerItemsByContainerID(containerID
 func (r *SQLiteProcurementRepository) SaveContainerItem(i *models.ContainerItem) error {
 	var err error
 	if i.ID == 0 {
-		_, err = r.db.Exec(`INSERT INTO Container_Item (PO_Item_ID, Container_ID, CI_ID, BL_ID, Item_ID, Unit_Price, Currency, Load_Qty, Gross_Weight, Net_Weight, Cbm, Remark) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			i.POItemID, i.ContainerID, i.CIID, i.BLID, i.ItemID, i.UnitPrice, i.Currency, i.LoadQty, i.GrossWeight, i.NetWeight, i.CBM, i.Remark)
+		_, err = r.db.Exec(`INSERT INTO Container_Item (PO_Item_ID, Container_ID, CI_ID, BL_ID, Item_ID, Unit_Price, Currency, Load_Qty, Gross_Weight, Net_Weight, Cbm, UUID, Remark) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			i.POItemID, i.ContainerID, i.CIID, i.BLID, i.ItemID, i.UnitPrice, i.Currency, i.LoadQty, i.GrossWeight, i.NetWeight, i.CBM, i.UUID, i.Remark)
 	} else {
-		_, err = r.db.Exec(`UPDATE Container_Item SET PO_Item_ID=?, Container_ID=?, CI_ID=?, BL_ID=?, Item_ID=?, Unit_Price=?, Currency=?, Load_Qty=?, Gross_Weight=?, Net_Weight=?, Cbm=?, Remark=? WHERE Container_Item_ID=?`,
-			i.POItemID, i.ContainerID, i.CIID, i.BLID, i.ItemID, i.UnitPrice, i.Currency, i.LoadQty, i.GrossWeight, i.NetWeight, i.CBM, i.Remark, i.ID)
+		_, err = r.db.Exec(`UPDATE Container_Item SET PO_Item_ID=?, Container_ID=?, CI_ID=?, BL_ID=?, Item_ID=?, Unit_Price=?, Currency=?, Load_Qty=?, Gross_Weight=?, Net_Weight=?, Cbm=?, UUID=?, Remark=? WHERE Container_Item_ID=?`,
+			i.POItemID, i.ContainerID, i.CIID, i.BLID, i.ItemID, i.UnitPrice, i.Currency, i.LoadQty, i.GrossWeight, i.NetWeight, i.CBM, i.UUID, i.Remark, i.ID)
 	}
 	return err
 }

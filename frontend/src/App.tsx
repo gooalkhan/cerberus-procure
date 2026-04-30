@@ -121,10 +121,11 @@ function App() {
                 gross_weight: booking.gross_weight || 0,
                 net_weight: booking.net_weight || 0,
                 cbm: booking.cbm || 0,
+                uuid: booking.uuid || '',
                 remark: booking.remark || '',
               });
             }}
-            emptyItem={{ container_item_id: 0, container_id: 0, container_no: '', status: 'Loaded', total_cbm: 0, total_net_wgt: 0, total_gross_wgt: 0, bl_id: 0, bl_no: '', bl_status: 'Released', etd: null, eta: null, pol: '', pod: '', carrier: '', vessel_name: '', po_item_id: 0, item_id: 0, ci_id: 0, load_qty: 0, unit_price: 0, currency: 'USD', gross_weight: 0, net_weight: 0, cbm: 0, remark: '' }}
+            emptyItem={{ container_item_id: 0, container_id: 0, container_no: '', status: 'Loaded', total_cbm: 0, total_net_wgt: 0, total_gross_wgt: 0, bl_id: 0, bl_no: '', bl_status: 'Released', etd: null, eta: null, pol: '', pod: '', carrier: '', vessel_name: '', po_item_id: 0, item_id: 0, ci_id: 0, load_qty: 0, unit_price: 0, currency: 'USD', gross_weight: 0, net_weight: 0, cbm: 0, uuid: '', remark: '' }}
             renderDetail={(booking) => <BookingFlow booking={booking} />}
           />
         )
@@ -314,7 +315,7 @@ function APDetail({ ap, onChange }: { ap: any, onChange: (updated: any) => void 
             value={ap.reference_type}
             onChange={e => onChange({ ...ap, reference_type: e.target.value })}
           >
-            {['PO', 'CI', 'Container', 'BL', 'GR', 'Lot'].map(t => (
+            {['PO', 'CI', 'Container', 'BL', 'GR', 'Lot', 'Container Item'].map(t => (
               <option key={t} value={t}>{t}</option>
             ))}
           </select>

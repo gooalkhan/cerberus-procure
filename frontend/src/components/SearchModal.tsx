@@ -14,7 +14,7 @@ const SearchModal: React.FC<SearchModalProps> = ({
   searchTerm: initialSearch,
   onClose,
   onSelect,
-  availableTypes = ['PO', 'CI', 'Container', 'BL', 'GR', 'Lot', 'PO Item', 'Vendor', 'Item']
+  availableTypes = ['PO', 'CI', 'Container', 'BL', 'GR', 'Lot', 'PO Item', 'Vendor', 'Item', 'Container Item']
 }) => {
   const [list, setList] = useState<any[]>([])
   const [search, setSearch] = useState(initialSearch)
@@ -38,6 +38,7 @@ const SearchModal: React.FC<SearchModalProps> = ({
         case 'Lot': data = await procureApi.getInventoryLots(); break;
         case 'Vendor': data = await procureApi.getVendors(); break;
         case 'Item': data = await procureApi.getItems(); break;
+        case 'Container Item': data = await procureApi.getBookings(); break;
         case 'PO Item':
           const pos = await procureApi.getPurchaseOrders();
           const allItems: any[] = [];
@@ -67,6 +68,7 @@ const SearchModal: React.FC<SearchModalProps> = ({
       case 'Vendor': return (item.name || '').toLowerCase().includes(s) || (item.business_reg_no || '').toLowerCase().includes(s)
       case 'Item': return (item.sku_code || '').toLowerCase().includes(s) || (item.name || '').toLowerCase().includes(s)
       case 'PO Item': return (item.po_no || '').toLowerCase().includes(s) || String(item.item_id).includes(s)
+      case 'Container Item': return (item.container_no || '').toLowerCase().includes(s) || (item.item_name || '').toLowerCase().includes(s)
       default: return false
     }
   })
@@ -131,6 +133,7 @@ const SearchModal: React.FC<SearchModalProps> = ({
                       case 'Vendor': no = item.name; info = `Reg: ${item.business_reg_no}`; break;
                       case 'Item': no = item.sku_code; info = item.name; break;
                       case 'PO Item': no = `${item.po_no} - Item ${item.item_id}`; info = `Qty: ${item.po_qty} / ${item.status}`; break;
+                      case 'Container Item': no = `${item.container_no} - ${item.item_name}`; info = `Qty: ${item.load_qty} / ${item.status}`; break;
                     }
                     return (
                       <tr key={idx} style={{ cursor: 'pointer' }} onClick={() => onSelect(item)}>
