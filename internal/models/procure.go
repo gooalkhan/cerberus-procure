@@ -135,15 +135,15 @@ type ContainerItem struct {
 	ContainerID int     `json:"container_id"`
 	CIID        int     `json:"ci_id"`
 	BLID        int     `json:"bl_id"`
-	ItemID      int     `json:"item_id"`
 	UnitPrice   float64 `json:"unit_price"`
 	Currency    string  `json:"currency"`
 	LoadQty     float64 `json:"load_qty"`
 	GrossWeight float64 `json:"gross_weight"`
 	NetWeight   float64 `json:"net_weight"`
-	CBM         float64 `json:"cbm"`
-	UUID        string  `json:"uuid"`
-	Remark      string  `json:"remark"`
+	CBM          float64   `json:"cbm"`
+	TemporaryETA time.Time `json:"temporary_eta"`
+	UUID         string    `json:"uuid"`
+	Remark       string    `json:"remark"`
 }
 
 // BL 선하증권 정보
@@ -232,14 +232,18 @@ type BookingView struct {
 	Carrier         string    `json:"carrier"`
 	VesselName      string    `json:"vessel_name"`
 	POItemID        int       `json:"po_item_id"`
+	POID            int       `json:"po_id"`
+	PONo            string    `json:"po_no"`
 	ItemID          int       `json:"item_id"`
 	ItemName        string    `json:"item_name"`
 	CIID            int       `json:"ci_id"`
+	CINo            string    `json:"ci_no"`
 	LoadQty         float64   `json:"load_qty"`
 	UnitPrice       float64   `json:"unit_price"`
 	Currency        string    `json:"currency"`
 	GrossWeight     float64   `json:"gross_weight"`
 	NetWeight       float64   `json:"net_weight"`
 	CBM             float64   `json:"cbm"`
+	TemporaryETA    time.Time `json:"temporary_eta"`
 	Remark          string    `json:"remark"`
 }

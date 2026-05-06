@@ -141,20 +141,19 @@ func migrateProcurement(db *sql.DB) error {
 			Container_ID INTEGER,
 			CI_ID INTEGER,
 			BL_ID INTEGER,
-			Item_ID INTEGER NOT NULL,
 			Unit_Price REAL,
 			Currency TEXT,
 			Load_Qty REAL,
 			Gross_Weight REAL,
 			Net_Weight REAL,
 			Cbm REAL,
+			Temporary_ETA DATETIME,
 			UUID TEXT UNIQUE NOT NULL,
 			Remark TEXT,
 			FOREIGN KEY (PO_Item_ID) REFERENCES PO_Item(PO_Item_ID),
 			FOREIGN KEY (Container_ID) REFERENCES Container(Container_ID),
 			FOREIGN KEY (CI_ID) REFERENCES Commercial_Invoice(CI_ID),
-			FOREIGN KEY (BL_ID) REFERENCES BL(BL_ID),
-			FOREIGN KEY (Item_ID) REFERENCES Item_Master(Item_ID)
+			FOREIGN KEY (BL_ID) REFERENCES BL(BL_ID)
 		)`,
 		`CREATE TABLE IF NOT EXISTS BL (
 			BL_ID INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -239,7 +238,7 @@ func migrateProcurement(db *sql.DB) error {
 		BEGIN
 			-- 1. Calculate item fields
 			UPDATE Container_Item
-			SET Item_ID = (SELECT Item_ID FROM PO_Item WHERE PO_Item_ID = NEW.PO_Item_ID),
+			SET 
 				Gross_Weight = (SELECT Gross_Weight FROM Item_Master im JOIN PO_Item pi ON im.Item_ID = pi.Item_ID WHERE pi.PO_Item_ID = NEW.PO_Item_ID) * NEW.Load_Qty,
 				Net_Weight = (SELECT Net_Weight FROM Item_Master im JOIN PO_Item pi ON im.Item_ID = pi.Item_ID WHERE pi.PO_Item_ID = NEW.PO_Item_ID) * NEW.Load_Qty,
 				Cbm = (SELECT CBM FROM Item_Master im JOIN PO_Item pi ON im.Item_ID = pi.Item_ID WHERE pi.PO_Item_ID = NEW.PO_Item_ID) * NEW.Load_Qty
@@ -257,7 +256,7 @@ func migrateProcurement(db *sql.DB) error {
 		BEGIN
 			-- 1. Calculate item fields
 			UPDATE Container_Item
-			SET Item_ID = (SELECT Item_ID FROM PO_Item WHERE PO_Item_ID = NEW.PO_Item_ID),
+			SET 
 				Gross_Weight = (SELECT Gross_Weight FROM Item_Master im JOIN PO_Item pi ON im.Item_ID = pi.Item_ID WHERE pi.PO_Item_ID = NEW.PO_Item_ID) * NEW.Load_Qty,
 				Net_Weight = (SELECT Net_Weight FROM Item_Master im JOIN PO_Item pi ON im.Item_ID = pi.Item_ID WHERE pi.PO_Item_ID = NEW.PO_Item_ID) * NEW.Load_Qty,
 				Cbm = (SELECT CBM FROM Item_Master im JOIN PO_Item pi ON im.Item_ID = pi.Item_ID WHERE pi.PO_Item_ID = NEW.PO_Item_ID) * NEW.Load_Qty
@@ -484,11 +483,12 @@ func (r *SQLiteProcurementRepository) GetCommercialInvoices() ([]models.Commerci
 }
 
 func (r *SQLiteProcurementRepository) GetCIAggregatedItems(ciID int) ([]models.CIAggregatedItem, error) {
-	query := `SELECT ci.Item_ID, im.Name, SUM(ci.Load_Qty), SUM(ci.Load_Qty * ci.Unit_Price), ci.Currency
+	query := `SELECT pi.Item_ID, im.Name, SUM(ci.Load_Qty), SUM(ci.Load_Qty * ci.Unit_Price), ci.Currency
 	          FROM Container_Item ci
-	          LEFT JOIN Item_Master im ON ci.Item_ID = im.Item_ID
+	          JOIN PO_Item pi ON ci.PO_Item_ID = pi.PO_Item_ID
+	          LEFT JOIN Item_Master im ON pi.Item_ID = im.Item_ID
 	          WHERE ci.CI_ID = ?
-	          GROUP BY ci.Item_ID, im.Name, ci.Currency`
+	          GROUP BY pi.Item_ID, im.Name, ci.Currency`
 	rows, err := r.db.Query(query, ciID)
 	if err != nil {
 		return nil, err
@@ -746,7 +746,13 @@ func (r *SQLiteProcurementRepository) SaveCostAllocation(ca *models.CostAllocati
 
 // Container Items
 func (r *SQLiteProcurementRepository) GetContainerItemsByContainerID(containerID int) ([]models.ContainerItem, error) {
-	rows, err := r.db.Query("SELECT Container_Item_ID, PO_Item_ID, IFNULL(Container_ID, 0), IFNULL(CI_ID, 0), IFNULL(BL_ID, 0), Item_ID, IFNULL(Unit_Price, 0), IFNULL(Currency, ''), IFNULL(Load_Qty, 0), IFNULL(Gross_Weight, 0), IFNULL(Net_Weight, 0), IFNULL(Cbm, 0), IFNULL(UUID, ''), IFNULL(Remark, '') FROM Container_Item WHERE Container_ID = ?", containerID)
+	rows, err := r.db.Query(`
+		SELECT 
+			ci.Container_Item_ID, ci.PO_Item_ID, IFNULL(ci.Container_ID, 0), IFNULL(ci.CI_ID, 0), IFNULL(ci.BL_ID, 0), 
+			IFNULL(ci.Unit_Price, 0), IFNULL(ci.Currency, ''), IFNULL(ci.Load_Qty, 0), 
+			IFNULL(ci.Gross_Weight, 0), IFNULL(ci.Net_Weight, 0), IFNULL(ci.Cbm, 0), ci.Temporary_ETA, IFNULL(ci.UUID, ''), IFNULL(ci.Remark, '') 
+		FROM Container_Item ci
+		WHERE ci.Container_ID = ?`, containerID)
 	if err != nil {
 		return nil, err
 	}
@@ -754,9 +760,13 @@ func (r *SQLiteProcurementRepository) GetContainerItemsByContainerID(containerID
 	list := []models.ContainerItem{}
 	for rows.Next() {
 		var i models.ContainerItem
-		err := rows.Scan(&i.ID, &i.POItemID, &i.ContainerID, &i.CIID, &i.BLID, &i.ItemID, &i.UnitPrice, &i.Currency, &i.LoadQty, &i.GrossWeight, &i.NetWeight, &i.CBM, &i.UUID, &i.Remark)
+		var tempEta *time.Time
+		err := rows.Scan(&i.ID, &i.POItemID, &i.ContainerID, &i.CIID, &i.BLID, &i.UnitPrice, &i.Currency, &i.LoadQty, &i.GrossWeight, &i.NetWeight, &i.CBM, &tempEta, &i.UUID, &i.Remark)
 		if err != nil {
 			return nil, err
+		}
+		if tempEta != nil {
+			i.TemporaryETA = *tempEta
 		}
 		list = append(list, i)
 	}
@@ -766,11 +776,11 @@ func (r *SQLiteProcurementRepository) GetContainerItemsByContainerID(containerID
 func (r *SQLiteProcurementRepository) SaveContainerItem(i *models.ContainerItem) error {
 	var err error
 	if i.ID == 0 {
-		_, err = r.db.Exec(`INSERT INTO Container_Item (PO_Item_ID, Container_ID, CI_ID, BL_ID, Item_ID, Unit_Price, Currency, Load_Qty, Gross_Weight, Net_Weight, Cbm, UUID, Remark) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			i.POItemID, i.ContainerID, i.CIID, i.BLID, i.ItemID, i.UnitPrice, i.Currency, i.LoadQty, i.GrossWeight, i.NetWeight, i.CBM, i.UUID, i.Remark)
+		_, err = r.db.Exec(`INSERT INTO Container_Item (PO_Item_ID, Container_ID, CI_ID, BL_ID, Unit_Price, Currency, Load_Qty, Gross_Weight, Net_Weight, Cbm, Temporary_ETA, UUID, Remark) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			i.POItemID, i.ContainerID, i.CIID, i.BLID, i.UnitPrice, i.Currency, i.LoadQty, i.GrossWeight, i.NetWeight, i.CBM, nullIfZero(i.TemporaryETA), i.UUID, i.Remark)
 	} else {
-		_, err = r.db.Exec(`UPDATE Container_Item SET PO_Item_ID=?, Container_ID=?, CI_ID=?, BL_ID=?, Item_ID=?, Unit_Price=?, Currency=?, Load_Qty=?, Gross_Weight=?, Net_Weight=?, Cbm=?, UUID=?, Remark=? WHERE Container_Item_ID=?`,
-			i.POItemID, i.ContainerID, i.CIID, i.BLID, i.ItemID, i.UnitPrice, i.Currency, i.LoadQty, i.GrossWeight, i.NetWeight, i.CBM, i.UUID, i.Remark, i.ID)
+		_, err = r.db.Exec(`UPDATE Container_Item SET PO_Item_ID=?, Container_ID=?, CI_ID=?, BL_ID=?, Unit_Price=?, Currency=?, Load_Qty=?, Gross_Weight=?, Net_Weight=?, Cbm=?, Temporary_ETA=?, UUID=?, Remark=? WHERE Container_Item_ID=?`,
+			i.POItemID, i.ContainerID, i.CIID, i.BLID, i.UnitPrice, i.Currency, i.LoadQty, i.GrossWeight, i.NetWeight, i.CBM, nullIfZero(i.TemporaryETA), i.UUID, i.Remark, i.ID)
 	}
 	return err
 }
@@ -849,20 +859,27 @@ func (r *SQLiteProcurementRepository) GetBookings() ([]models.BookingView, error
 			IFNULL(b.Carrier, ''),
 			IFNULL(b.Vessel_Name, ''),
 			IFNULL(ci.PO_Item_ID, 0),
-			IFNULL(ci.Item_ID, 0),
+			IFNULL(pi.PO_ID, 0),
+			IFNULL(p.PO_No, ''),
+			IFNULL(pi.Item_ID, 0),
 			IFNULL(im.Name, '') as Item_Name,
 			IFNULL(ci.CI_ID, 0),
+			IFNULL(ci_tbl.CI_No, ''),
 			IFNULL(ci.Load_Qty, 0),
 			IFNULL(ci.Unit_Price, 0),
 			IFNULL(ci.Currency, ''),
 			IFNULL(ci.Gross_Weight, 0),
 			IFNULL(ci.Net_Weight, 0),
 			IFNULL(ci.Cbm, 0),
+			ci.Temporary_ETA,
 			IFNULL(ci.Remark, '')
 		FROM Container_Item ci
 		LEFT JOIN Container c ON ci.Container_ID = c.Container_ID
 		LEFT JOIN BL b ON ci.BL_ID = b.BL_ID
-		LEFT JOIN Item_Master im ON ci.Item_ID = im.Item_ID
+		JOIN PO_Item pi ON ci.PO_Item_ID = pi.PO_Item_ID
+		JOIN Purchase_Order p ON pi.PO_ID = p.PO_ID
+		LEFT JOIN Commercial_Invoice ci_tbl ON ci.CI_ID = ci_tbl.CI_ID
+		LEFT JOIN Item_Master im ON pi.Item_ID = im.Item_ID
 		ORDER BY 
 			CASE c.Status 
 				WHEN 'Loaded' THEN 1 
@@ -883,16 +900,20 @@ func (r *SQLiteProcurementRepository) GetBookings() ([]models.BookingView, error
 	for rows.Next() {
 		var b models.BookingView
 		var etd, eta *time.Time
+		var tempEta *time.Time
 		err := rows.Scan(
 			&b.ContainerItemID, &b.ContainerID, &b.ContainerNo, &b.Status,
 			&b.TotalCBM, &b.TotalNetWgt, &b.TotalGrossWgt,
 			&b.BLID, &b.BLNo, &b.BLStatus, &etd, &eta,
 			&b.POL, &b.POD, &b.Carrier, &b.VesselName,
-			&b.POItemID, &b.ItemID, &b.ItemName, &b.CIID, &b.LoadQty, &b.UnitPrice, &b.Currency,
-			&b.GrossWeight, &b.NetWeight, &b.CBM, &b.Remark,
+			&b.POItemID, &b.POID, &b.PONo, &b.ItemID, &b.ItemName, &b.CIID, &b.CINo, &b.LoadQty, &b.UnitPrice, &b.Currency,
+			&b.GrossWeight, &b.NetWeight, &b.CBM, &tempEta, &b.Remark,
 		)
 		if err != nil {
 			return nil, err
+		}
+		if tempEta != nil {
+			b.TemporaryETA = *tempEta
 		}
 		if etd != nil {
 			b.ETD = *etd

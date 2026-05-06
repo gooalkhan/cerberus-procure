@@ -288,7 +288,22 @@ function CrudPage<T extends { [key: string]: any }>({ title, columns, fetchData,
           searchTerm=""
           onClose={() => setSearchConfig(null)}
           onSelect={(item) => {
-            const id = item.vendor_id || item.po_id || item.ci_id || item.container_id || item.bl_id || item.id;
+            const getID = (item: any, type: string) => {
+              switch (type) {
+                case 'Vendor': return item.vendor_id;
+                case 'PO': return item.po_id;
+                case 'CI': return item.ci_id;
+                case 'Container': return item.container_id;
+                case 'BL': return item.bl_id;
+                case 'PO Item': return item.po_item_id || item.id;
+                case 'Item': return item.item_id;
+                case 'GR': return item.gr_id;
+                case 'Lot': return item.lot_id;
+                case 'Container Item': return item.container_item_id;
+                default: return item.id || item.vendor_id || item.po_id || item.ci_id || item.container_id || item.bl_id;
+              }
+            };
+            const id = getID(item, searchConfig.type);
             if (selectedItem) {
               setSelectedItem({ ...selectedItem, [searchConfig.field]: id });
             }

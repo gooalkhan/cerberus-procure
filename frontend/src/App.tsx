@@ -99,11 +99,11 @@ function App() {
               { key: 'bl_id', label: 'BL ID', type: 'number', tableHidden: true, searchType: 'BL' },
               { key: 'po_item_id', label: 'PO Item ID', type: 'number', tableHidden: true, searchType: 'PO Item' },
               { key: 'ci_id', label: 'CI ID', type: 'number', tableHidden: true, searchType: 'CI' },
-              { key: 'item_id', label: 'Item ID', type: 'number', tableHidden: true, searchType: 'Item' },
               { key: 'item_name', label: 'Item Name', formHidden: true },
               { key: 'divider_1', label: '', divider: true },
               { key: 'load_qty', label: 'Load Qty', type: 'number', filterType: 'none' },
               { key: 'cbm', label: 'CBM', type: 'number', formHidden: true },
+              { key: 'temporary_eta', label: 'Temporary ETA', type: 'date' },
               { key: 'remark', label: 'Remark', fullWidth: true },
             ]}
             fetchData={procureApi.getBookings}
@@ -113,7 +113,6 @@ function App() {
                 container_id: booking.container_id,
                 bl_id: booking.bl_id,
                 po_item_id: booking.po_item_id,
-                item_id: booking.item_id || 0,
                 ci_id: booking.ci_id || 0,
                 load_qty: booking.load_qty,
                 unit_price: booking.unit_price,
@@ -121,11 +120,12 @@ function App() {
                 gross_weight: booking.gross_weight || 0,
                 net_weight: booking.net_weight || 0,
                 cbm: booking.cbm || 0,
+                temporary_eta: booking.temporary_eta || null,
                 uuid: booking.uuid || '',
                 remark: booking.remark || '',
               });
             }}
-            emptyItem={{ container_item_id: 0, container_id: 0, container_no: '', status: 'Loaded', total_cbm: 0, total_net_wgt: 0, total_gross_wgt: 0, bl_id: 0, bl_no: '', bl_status: 'Released', etd: null, eta: null, pol: '', pod: '', carrier: '', vessel_name: '', po_item_id: 0, item_id: 0, ci_id: 0, load_qty: 0, unit_price: 0, currency: 'USD', gross_weight: 0, net_weight: 0, cbm: 0, uuid: '', remark: '' }}
+            emptyItem={{ container_item_id: 0, container_id: 0, container_no: '', status: 'Loaded', total_cbm: 0, total_net_wgt: 0, total_gross_wgt: 0, bl_id: 0, bl_no: '', bl_status: 'Released', etd: null, eta: null, pol: '', pod: '', carrier: '', vessel_name: '', po_item_id: 0, item_id: 0, ci_id: 0, load_qty: 0, unit_price: 0, currency: 'USD', gross_weight: 0, net_weight: 0, cbm: 0, temporary_eta: null, uuid: '', remark: '' }}
             renderDetail={(booking) => <BookingFlow booking={booking} />}
           />
         )
@@ -619,33 +619,6 @@ function VendorDetail({ vendor }: { vendor: any }) {
 
 
 function BookingFlow({ booking }: { booking: any }) {
-  const [details, setDetails] = useState<any>(null);
-
-  useEffect(() => {
-    const load = async () => {
-      const data: any = {};
-      if (booking.po_item_id) {
-        const poItem = await procureApi.getPOItems(0); // Mock/Generic fetch
-        // In a real app, we'd have a specific "getPOByItemID" or similar
-        const pos = await procureApi.getPurchaseOrders();
-        const po = pos.find(p => p.po_id === booking.po_id); // Assuming po_id is in booking
-        data.po_no = po?.po_no || 'PO-' + booking.po_item_id;
-      }
-      if (booking.ci_id) {
-        const cis = await procureApi.getCommercialInvoices();
-        const ci = cis.find(c => c.ci_id === booking.ci_id);
-        data.ci_no = ci?.ci_no || 'CI-' + booking.ci_id;
-      }
-      if (booking.item_id) {
-        const items = await procureApi.getItems();
-        const item = items.find(i => i.item_id === booking.item_id);
-        data.item_name = item?.name || 'Item-' + booking.item_id;
-      }
-      setDetails(data);
-    };
-    load();
-  }, [booking]);
-
   const Step = ({ label, value, color }: { label: string, value: string, color: string }) => (
     <div style={{
       flex: 1,
@@ -668,18 +641,18 @@ function BookingFlow({ booking }: { booking: any }) {
     <div style={{ marginTop: '2rem', borderTop: '1px solid #333', paddingTop: '1.5rem' }}>
       <h3 style={{ marginBottom: '1.5rem' }}>Logistics Relationship Flow</h3>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'stretch' }}>
-        <Step label="Source PO" value={details?.po_no} color="#f59e0b" />
+        <Step label="Source PO" value={booking.po_no} color="#f59e0b" />
         <Arrow />
-        <Step label="PO Item" value={details?.item_name} color="#10b981" />
+        <Step label="PO Item" value={booking.item_name} color="#10b981" />
         <Arrow />
         <Step label="Container" value={booking.container_no} color="#3b82f6" />
         <Arrow />
         <Step label="B/L" value={booking.bl_no} color="#8b5cf6" />
         <Arrow />
-        <Step label="Invoice (CI)" value={details?.ci_no} color="#ec4899" />
+        <Step label="Invoice (CI)" value={booking.ci_no} color="#ec4899" />
       </div>
       <div style={{ marginTop: '1rem', fontSize: '0.8rem', opacity: 0.6, textAlign: 'center' }}>
-        Linking: PO #{details?.po_no || '...'} contains {booking.load_qty} units of {details?.item_name || '...'} loaded in Container {booking.container_no || '...'} under B/L {booking.bl_no || '...'} for Invoice {details?.ci_no || '...'}.
+        Linking: PO #{booking.po_no || '...'} contains {booking.load_qty} units of {booking.item_name || '...'} loaded in Container {booking.container_no || '...'} under B/L {booking.bl_no || '...'} for Invoice {booking.ci_no || '...'}.
       </div>
     </div>
   );

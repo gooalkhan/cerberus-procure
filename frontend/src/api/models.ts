@@ -98,13 +98,13 @@ export interface ContainerItem {
   container_id: number;
   ci_id: number;
   bl_id: number;
-  item_id: number;
   unit_price: number;
   currency: string;
   load_qty: number;
   gross_weight: number;
   net_weight: number;
   cbm: number;
+  temporary_eta: string | null;
   uuid: string;
   remark: string;
 }
@@ -175,14 +175,18 @@ export interface BookingView {
   carrier: string;
   vessel_name: string;
   po_item_id: number;
+  po_id: number;
+  po_no: string;
   item_id: number;
   item_name: string;
   ci_id: number;
+  ci_no: string;
   load_qty: number;
   unit_price: number;
   currency: string;
   gross_weight: number;
   net_weight: number;
   cbm: number;
+  temporary_eta: string | null;
   remark: string;
 }
