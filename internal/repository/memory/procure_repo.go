@@ -674,6 +674,12 @@ func (r *MemoryProcurementRepository) GetBookings() ([]models.BookingView, error
 					ciNo = c.CINo
 				}
 			}
+
+			eta := bl.ETA
+			if eta.IsZero() {
+				eta = ci.TemporaryETA
+			}
+
 			list = append(list, models.BookingView{
 				ContainerItemID: ci.ID,
 				ContainerID:     ci.ContainerID,
@@ -686,7 +692,7 @@ func (r *MemoryProcurementRepository) GetBookings() ([]models.BookingView, error
 				BLNo:            bl.BLNo,
 				BLStatus:        bl.Status,
 				ETD:             bl.ETD,
-				ETA:             bl.ETA,
+				ETA:             eta,
 				POL:             bl.POL,
 				POD:             bl.POD,
 				Carrier:         bl.Carrier,

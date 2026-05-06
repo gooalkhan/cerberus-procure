@@ -90,6 +90,7 @@ function App() {
           <CrudPage
             title="Bookings"
             columns={[
+              { key: 'container_item_id', label: 'ID', formHidden: true, filterType: 'none' },
               { key: 'container_no', label: 'Container No', formHidden: true },
               { key: 'bl_no', label: 'BL No', formHidden: true },
               { key: 'status', label: 'Status', filterType: 'select', filterOptions: ['Loaded', 'Shipping', 'Arrived'], formHidden: true },
@@ -103,7 +104,7 @@ function App() {
               { key: 'divider_1', label: '', divider: true },
               { key: 'load_qty', label: 'Load Qty', type: 'number', filterType: 'none' },
               { key: 'cbm', label: 'CBM', type: 'number', formHidden: true },
-              { key: 'temporary_eta', label: 'Temporary ETA', type: 'date' },
+              { key: 'temporary_eta', label: 'Temporary ETA', type: 'date', filterType: 'none', tableHidden: true },
               { key: 'remark', label: 'Remark', fullWidth: true },
             ]}
             fetchData={procureApi.getBookings}

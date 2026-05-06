@@ -887,7 +887,7 @@ func (r *SQLiteProcurementRepository) GetBookings() ([]models.BookingView, error
 				WHEN 'Arrived' THEN 3 
 				ELSE 4 
 			END,
-			b.ETA ASC,
+			IFNULL(b.ETA, ci.Temporary_ETA) ASC,
 			c.Container_No ASC
 	`
 	rows, err := r.db.Query(query)
@@ -918,8 +918,10 @@ func (r *SQLiteProcurementRepository) GetBookings() ([]models.BookingView, error
 		if etd != nil {
 			b.ETD = *etd
 		}
-		if eta != nil {
+		if eta != nil && !eta.IsZero() {
 			b.ETA = *eta
+		} else if tempEta != nil {
+			b.ETA = *tempEta
 		}
 		list = append(list, b)
 	}

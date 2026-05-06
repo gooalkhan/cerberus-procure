@@ -39,15 +39,31 @@ const SearchModal: React.FC<SearchModalProps> = ({
         case 'Vendor': data = await procureApi.getVendors(); break;
         case 'Item': data = await procureApi.getItems(); break;
         case 'Container Item': data = await procureApi.getBookings(); break;
-        case 'PO Item':
-          const pos = await procureApi.getPurchaseOrders();
+        case 'PO Item': {
+          const [pos, bookings] = await Promise.all([
+            procureApi.getPurchaseOrders(),
+            procureApi.getBookings()
+          ]);
+          
+          const bookedQtyMap: Record<number, number> = {};
+          bookings.forEach((b: any) => {
+            if (b.po_item_id) {
+              bookedQtyMap[b.po_item_id] = (bookedQtyMap[b.po_item_id] || 0) + (b.load_qty || 0);
+            }
+          });
+
           const allItems: any[] = [];
           for (const po of pos) {
             const items = await procureApi.getPOItems(po.po_id);
-            allItems.push(...items.map(it => ({ ...it, po_no: po.po_no, id: it.po_item_id })));
+            allItems.push(...items.map(it => {
+              const booked = bookedQtyMap[it.po_item_id] || 0;
+              const notBooked = it.po_qty - booked;
+              return { ...it, po_no: po.po_no, id: it.po_item_id, not_booked: notBooked };
+            }));
           }
           data = allItems;
           break;
+        }
       }
       setList(data)
     } finally {
@@ -132,7 +148,7 @@ const SearchModal: React.FC<SearchModalProps> = ({
                       case 'Lot': no = item.lot_no; info = `Qty: ${item.qty}`; break;
                       case 'Vendor': no = item.name; info = `Reg: ${item.business_reg_no}`; break;
                       case 'Item': no = item.sku_code; info = item.name; break;
-                      case 'PO Item': no = `${item.po_no} - Item ${item.item_id}`; info = `Qty: ${item.po_qty} / ${item.status}`; break;
+                      case 'PO Item': no = `${item.po_no} - Item ${item.item_id}`; info = `Not Booked: ${item.not_booked} / Total Qty: ${item.po_qty}`; break;
                       case 'Container Item': no = `${item.container_no} - ${item.item_name}`; info = `Qty: ${item.load_qty} / ${item.status}`; break;
                     }
                     return (
