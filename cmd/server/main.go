@@ -11,6 +11,8 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"reflect"
+	"runtime"
 	"sync"
 	"time"
 )
@@ -155,8 +157,9 @@ func deleteTodoHandler(w http.ResponseWriter, r *http.Request) {
 
 type loggingResponseWriter struct {
 	http.ResponseWriter
-	statusCode int
-	body       []byte
+	statusCode  int
+	body        []byte
+	handlerName string
 }
 
 func (lrw *loggingResponseWriter) WriteHeader(code int) {
@@ -174,10 +177,27 @@ func (lrw *loggingResponseWriter) Write(b []byte) (int, error) {
 	return lrw.ResponseWriter.Write(b)
 }
 
+func getFunctionName(i interface{}) string {
+	if i == nil {
+		return "unknown"
+	}
+	pc := reflect.ValueOf(i).Pointer()
+	fn := runtime.FuncForPC(pc)
+	if fn == nil {
+		return "unknown"
+	}
+	return fn.Name()
+}
+
 func corsMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	defaultHandlerName := getFunctionName(next)
 	return func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		lrw := &loggingResponseWriter{ResponseWriter: w, statusCode: http.StatusOK}
+		lrw := &loggingResponseWriter{
+			ResponseWriter: w,
+			statusCode:     http.StatusOK,
+			handlerName:    defaultHandlerName,
+		}
 		
 		lrw.Header().Set("Access-Control-Allow-Origin", "*")
 		lrw.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, DELETE")
@@ -190,6 +210,10 @@ func corsMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		}
 		
 		if apiLogger != nil {
+			handlerName := lrw.handlerName
+			if handlerName == "" {
+				handlerName = "unknown"
+			}
 			if lrw.statusCode >= 400 {
 				// Clean up the error message for single-line logging
 				errMsg := ""
@@ -199,16 +223,21 @@ func corsMiddleware(next http.HandlerFunc) http.HandlerFunc {
 						errMsg = errMsg[:len(errMsg)-1]
 					}
 				}
-				apiLogger.Printf("[%s] %s %s - %d %s - %v - Error: %s", r.RemoteAddr, r.Method, r.URL.Path, lrw.statusCode, http.StatusText(lrw.statusCode), time.Since(start), errMsg)
+				apiLogger.Printf("[%s] %s %s [%s] - %d %s - %v - Error: %s", r.RemoteAddr, r.Method, r.URL.Path, handlerName, lrw.statusCode, http.StatusText(lrw.statusCode), time.Since(start), errMsg)
 			} else {
-				apiLogger.Printf("[%s] %s %s - %d %s - %v", r.RemoteAddr, r.Method, r.URL.Path, lrw.statusCode, http.StatusText(lrw.statusCode), time.Since(start))
+				apiLogger.Printf("[%s] %s %s [%s] - %d %s - %v", r.RemoteAddr, r.Method, r.URL.Path, handlerName, lrw.statusCode, http.StatusText(lrw.statusCode), time.Since(start))
 			}
 		}
 	}
 }
 
 func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	targetHandlerName := getFunctionName(next)
 	return func(w http.ResponseWriter, r *http.Request) {
+		if lrw, ok := w.(*loggingResponseWriter); ok {
+			lrw.handlerName = targetHandlerName
+		}
+
 		cookie, err := r.Cookie("session_id")
 		if err != nil {
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
@@ -225,6 +254,303 @@ func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		}
 
 		next(w, r)
+	}
+}
+
+func seedHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPost {
+		procureUC.SeedData()
+		w.WriteHeader(http.StatusOK)
+	}
+}
+
+func itemsHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method == http.MethodGet {
+		items, err := procureUC.GetItems()
+		if err != nil {
+			fmt.Println("GetItems Error:", err)
+		}
+		json.NewEncoder(w).Encode(items)
+	} else if r.Method == http.MethodPost {
+		var i models.ItemMaster
+		err := json.NewDecoder(r.Body).Decode(&i)
+		if err != nil {
+			fmt.Println("Decode Error (Items):", err)
+		}
+		err = procureUC.SaveItem(&i)
+		if err != nil {
+			fmt.Println("Save Error (Items):", err)
+		}
+		w.WriteHeader(http.StatusOK)
+	}
+}
+
+func vendorsHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method == http.MethodGet {
+		list, _ := procureUC.GetVendors()
+		json.NewEncoder(w).Encode(list)
+	} else if r.Method == http.MethodPost {
+		var i models.VendorMaster
+		json.NewDecoder(r.Body).Decode(&i)
+		procureUC.SaveVendor(&i)
+		w.WriteHeader(http.StatusOK)
+	}
+}
+
+func posHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method == http.MethodGet {
+		list, _ := procureUC.GetPurchaseOrders()
+		json.NewEncoder(w).Encode(list)
+	} else if r.Method == http.MethodPost {
+		var i models.PurchaseOrder
+		if err := json.NewDecoder(r.Body).Decode(&i); err != nil {
+			if serverLogger != nil { serverLogger.Printf("PO Decode Error: %v", err) }
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if err := procureUC.SavePurchaseOrder(&i); err != nil {
+			if serverLogger != nil { serverLogger.Printf("PO Save Error: %v", err) }
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}
+}
+
+func poItemsHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method == http.MethodGet {
+		poIDStr := r.URL.Query().Get("poId")
+		var poID int
+		fmt.Sscanf(poIDStr, "%d", &poID)
+		list, _ := procureUC.GetPOItemsByPOID(poID)
+		json.NewEncoder(w).Encode(list)
+	} else if r.Method == http.MethodPost {
+		var i models.POItem
+		if err := json.NewDecoder(r.Body).Decode(&i); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if err := procureUC.SavePOItem(&i); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	} else if r.Method == http.MethodDelete {
+		idStr := r.URL.Query().Get("id")
+		var id int
+		fmt.Sscanf(idStr, "%d", &id)
+		if err := procureUC.DeletePOItem(id); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}
+}
+
+func invoicesHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method == http.MethodGet {
+		list, _ := procureUC.GetCommercialInvoices()
+		json.NewEncoder(w).Encode(list)
+	} else if r.Method == http.MethodPost {
+		var i models.CommercialInvoice
+		json.NewDecoder(r.Body).Decode(&i)
+		procureUC.SaveCommercialInvoice(&i)
+		w.WriteHeader(http.StatusOK)
+	}
+}
+
+func invoiceItemsHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method == http.MethodGet {
+		ciIDStr := r.URL.Query().Get("ciId")
+		var ciID int
+		fmt.Sscanf(ciIDStr, "%d", &ciID)
+		list, _ := procureUC.GetCIAggregatedItems(ciID)
+		json.NewEncoder(w).Encode(list)
+	}
+}
+
+func apsHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method == http.MethodGet {
+		list, _ := procureUC.GetAccountPayables()
+		json.NewEncoder(w).Encode(list)
+	} else if r.Method == http.MethodPost {
+		var i models.AccountPayable
+		if err := json.NewDecoder(r.Body).Decode(&i); err != nil {
+			if serverLogger != nil { serverLogger.Printf("AP Decode Error: %v", err) }
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if err := procureUC.SaveAccountPayable(&i); err != nil {
+			if serverLogger != nil { serverLogger.Printf("AP Save Error: %v", err) }
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}
+}
+
+func containersHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method == http.MethodGet {
+		list, _ := procureUC.GetContainers()
+		json.NewEncoder(w).Encode(list)
+	} else if r.Method == http.MethodPost {
+		var i models.Container
+		json.NewDecoder(r.Body).Decode(&i)
+		procureUC.SaveContainer(&i)
+		w.WriteHeader(http.StatusOK)
+	}
+}
+
+func containerItemsHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method == http.MethodGet {
+		cIDStr := r.URL.Query().Get("containerId")
+		var cID int
+		fmt.Sscanf(cIDStr, "%d", &cID)
+		list, _ := procureUC.GetContainerItemsByContainerID(cID)
+		json.NewEncoder(w).Encode(list)
+	} else if r.Method == http.MethodPost {
+		var i models.ContainerItem
+		json.NewDecoder(r.Body).Decode(&i)
+		procureUC.SaveContainerItem(&i)
+		w.WriteHeader(http.StatusOK)
+	}
+}
+
+func containersByBLHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method == http.MethodGet {
+		blIDStr := r.URL.Query().Get("blId")
+		var blID int
+		fmt.Sscanf(blIDStr, "%d", &blID)
+		list, _ := procureUC.GetContainersByBLID(blID)
+		json.NewEncoder(w).Encode(list)
+	}
+}
+
+func blsHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method == http.MethodGet {
+		list, _ := procureUC.GetBLs()
+		json.NewEncoder(w).Encode(list)
+	} else if r.Method == http.MethodPost {
+		var i models.BL
+		if err := json.NewDecoder(r.Body).Decode(&i); err != nil {
+			if serverLogger != nil { serverLogger.Printf("BL Decode Error: %v", err) }
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if err := procureUC.SaveBL(&i); err != nil {
+			if serverLogger != nil { serverLogger.Printf("BL Save Error: %v", err) }
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}
+}
+
+func grsHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method == http.MethodGet {
+		list, _ := procureUC.GetGoodsReceipts()
+		json.NewEncoder(w).Encode(list)
+	} else if r.Method == http.MethodPost {
+		var i models.GoodsReceipt
+		if err := json.NewDecoder(r.Body).Decode(&i); err != nil {
+			if serverLogger != nil { serverLogger.Printf("GR Decode Error: %v", err) }
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if err := procureUC.SaveGoodsReceipt(&i); err != nil {
+			if serverLogger != nil { serverLogger.Printf("GR Save Error: %v", err) }
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}
+}
+
+func lotsHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method == http.MethodGet {
+		list, _ := procureUC.GetInventoryLots()
+		json.NewEncoder(w).Encode(list)
+	} else if r.Method == http.MethodPost {
+		var i models.InventoryLot
+		if err := json.NewDecoder(r.Body).Decode(&i); err != nil {
+			if serverLogger != nil { serverLogger.Printf("Lot Decode Error: %v", err) }
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if err := procureUC.SaveInventoryLot(&i); err != nil {
+			if serverLogger != nil { serverLogger.Printf("Lot Save Error: %v", err) }
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}
+}
+
+func lotsByGRHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method == http.MethodGet {
+		grIDStr := r.URL.Query().Get("grId")
+		var grID int
+		fmt.Sscanf(grIDStr, "%d", &grID)
+		list, _ := procureUC.GetInventoryLotsByGRID(grID)
+		json.NewEncoder(w).Encode(list)
+	}
+}
+
+func allocationsHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method == http.MethodGet {
+		list, _ := procureUC.GetCostAllocations()
+		json.NewEncoder(w).Encode(list)
+	} else if r.Method == http.MethodPost {
+		var i models.CostAllocation
+		if err := json.NewDecoder(r.Body).Decode(&i); err != nil {
+			if serverLogger != nil { serverLogger.Printf("Cost Allocation Decode Error: %v", err) }
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if err := procureUC.SaveCostAllocation(&i); err != nil {
+			if serverLogger != nil { serverLogger.Printf("Cost Allocation Save Error: %v", err) }
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}
+}
+
+func bookingsHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method == http.MethodGet {
+		list, err := procureUC.GetBookings()
+		if err != nil {
+			fmt.Println("GetBookings Error:", err)
+		}
+		json.NewEncoder(w).Encode(list)
+	}
+}
+
+func todosHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	switch r.Method {
+	case http.MethodGet:
+		getTodosHandler(w, r)
+	case http.MethodPost:
+		addTodoHandler(w, r)
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
 }
 
@@ -256,290 +582,24 @@ func main() {
 	mux.HandleFunc("/api/login", corsMiddleware(loginHandler))
 	mux.HandleFunc("/api/me", corsMiddleware(authMiddleware(meHandler)))
 	
-	mux.HandleFunc("/api/seed", corsMiddleware(authMiddleware(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodPost {
-			procureUC.SeedData()
-			w.WriteHeader(http.StatusOK)
-		}
-	})))
-	// Items API
-	mux.HandleFunc("/api/items", corsMiddleware(authMiddleware(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if r.Method == http.MethodGet {
-			items, err := procureUC.GetItems()
-			if err != nil {
-				fmt.Println("GetItems Error:", err)
-			}
-			json.NewEncoder(w).Encode(items)
-		} else if r.Method == http.MethodPost {
-			var i models.ItemMaster
-			err := json.NewDecoder(r.Body).Decode(&i)
-			if err != nil {
-				fmt.Println("Decode Error (Items):", err)
-			}
-			err = procureUC.SaveItem(&i)
-			if err != nil {
-				fmt.Println("Save Error (Items):", err)
-			}
-			w.WriteHeader(http.StatusOK)
-		}
-	})))
-
-	// Vendors API
-	mux.HandleFunc("/api/vendors", corsMiddleware(authMiddleware(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if r.Method == http.MethodGet {
-			list, _ := procureUC.GetVendors()
-			json.NewEncoder(w).Encode(list)
-		} else if r.Method == http.MethodPost {
-			var i models.VendorMaster
-			json.NewDecoder(r.Body).Decode(&i)
-			procureUC.SaveVendor(&i)
-			w.WriteHeader(http.StatusOK)
-		}
-	})))
-
-	// PO API
-	mux.HandleFunc("/api/pos", corsMiddleware(authMiddleware(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if r.Method == http.MethodGet {
-			list, _ := procureUC.GetPurchaseOrders()
-			json.NewEncoder(w).Encode(list)
-		} else if r.Method == http.MethodPost {
-			var i models.PurchaseOrder
-			json.NewDecoder(r.Body).Decode(&i)
-			procureUC.SavePurchaseOrder(&i)
-			w.WriteHeader(http.StatusOK)
-		}
-	})))
-
-	// PO Items API
-	mux.HandleFunc("/api/pos/items", corsMiddleware(authMiddleware(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if r.Method == http.MethodGet {
-			poIDStr := r.URL.Query().Get("poId")
-			var poID int
-			fmt.Sscanf(poIDStr, "%d", &poID)
-			list, _ := procureUC.GetPOItemsByPOID(poID)
-			json.NewEncoder(w).Encode(list)
-		} else if r.Method == http.MethodPost {
-			var i models.POItem
-			json.NewDecoder(r.Body).Decode(&i)
-			procureUC.SavePOItem(&i)
-			w.WriteHeader(http.StatusOK)
-		}
-	})))
-
-	// Invoices API
-	mux.HandleFunc("/api/invoices", corsMiddleware(authMiddleware(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if r.Method == http.MethodGet {
-			list, _ := procureUC.GetCommercialInvoices()
-			json.NewEncoder(w).Encode(list)
-		} else if r.Method == http.MethodPost {
-			var i models.CommercialInvoice
-			json.NewDecoder(r.Body).Decode(&i)
-			procureUC.SaveCommercialInvoice(&i)
-			w.WriteHeader(http.StatusOK)
-		}
-	})))
-
-	mux.HandleFunc("/api/invoices/items", corsMiddleware(authMiddleware(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if r.Method == http.MethodGet {
-			ciIDStr := r.URL.Query().Get("ciId")
-			var ciID int
-			fmt.Sscanf(ciIDStr, "%d", &ciID)
-			list, _ := procureUC.GetCIAggregatedItems(ciID)
-			json.NewEncoder(w).Encode(list)
-		}
-	})))
-
-	// AP API
-	mux.HandleFunc("/api/aps", corsMiddleware(authMiddleware(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if r.Method == http.MethodGet {
-			list, _ := procureUC.GetAccountPayables()
-			json.NewEncoder(w).Encode(list)
-		} else if r.Method == http.MethodPost {
-			var i models.AccountPayable
-			if err := json.NewDecoder(r.Body).Decode(&i); err != nil {
-				if serverLogger != nil { serverLogger.Printf("AP Decode Error: %v", err) }
-				http.Error(w, err.Error(), http.StatusBadRequest)
-				return
-			}
-			if err := procureUC.SaveAccountPayable(&i); err != nil {
-				if serverLogger != nil { serverLogger.Printf("AP Save Error: %v", err) }
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			w.WriteHeader(http.StatusOK)
-		}
-	})))
-
-	// Containers API
-	mux.HandleFunc("/api/containers", corsMiddleware(authMiddleware(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if r.Method == http.MethodGet {
-			list, _ := procureUC.GetContainers()
-			json.NewEncoder(w).Encode(list)
-		} else if r.Method == http.MethodPost {
-			var i models.Container
-			json.NewDecoder(r.Body).Decode(&i)
-			procureUC.SaveContainer(&i)
-			w.WriteHeader(http.StatusOK)
-		}
-	})))
-
-	mux.HandleFunc("/api/containers/items", corsMiddleware(authMiddleware(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if r.Method == http.MethodGet {
-			cIDStr := r.URL.Query().Get("containerId")
-			var cID int
-			fmt.Sscanf(cIDStr, "%d", &cID)
-			list, _ := procureUC.GetContainerItemsByContainerID(cID)
-			json.NewEncoder(w).Encode(list)
-		} else if r.Method == http.MethodPost {
-			var i models.ContainerItem
-			json.NewDecoder(r.Body).Decode(&i)
-			procureUC.SaveContainerItem(&i)
-			w.WriteHeader(http.StatusOK)
-		}
-	})))
-
-	mux.HandleFunc("/api/containers/bl", corsMiddleware(authMiddleware(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if r.Method == http.MethodGet {
-			blIDStr := r.URL.Query().Get("blId")
-			var blID int
-			fmt.Sscanf(blIDStr, "%d", &blID)
-			list, _ := procureUC.GetContainersByBLID(blID)
-			json.NewEncoder(w).Encode(list)
-		}
-	})))
-
-	// BL API
-	mux.HandleFunc("/api/bls", corsMiddleware(authMiddleware(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if r.Method == http.MethodGet {
-			list, _ := procureUC.GetBLs()
-			json.NewEncoder(w).Encode(list)
-		} else if r.Method == http.MethodPost {
-			var i models.BL
-			if err := json.NewDecoder(r.Body).Decode(&i); err != nil {
-				if serverLogger != nil { serverLogger.Printf("BL Decode Error: %v", err) }
-				http.Error(w, err.Error(), http.StatusBadRequest)
-				return
-			}
-			if err := procureUC.SaveBL(&i); err != nil {
-				if serverLogger != nil { serverLogger.Printf("BL Save Error: %v", err) }
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			w.WriteHeader(http.StatusOK)
-		}
-	})))
-
-	// GR API
-	mux.HandleFunc("/api/grs", corsMiddleware(authMiddleware(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if r.Method == http.MethodGet {
-			list, _ := procureUC.GetGoodsReceipts()
-			json.NewEncoder(w).Encode(list)
-		} else if r.Method == http.MethodPost {
-			var i models.GoodsReceipt
-			if err := json.NewDecoder(r.Body).Decode(&i); err != nil {
-				if serverLogger != nil { serverLogger.Printf("GR Decode Error: %v", err) }
-				http.Error(w, err.Error(), http.StatusBadRequest)
-				return
-			}
-			if err := procureUC.SaveGoodsReceipt(&i); err != nil {
-				if serverLogger != nil { serverLogger.Printf("GR Save Error: %v", err) }
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			w.WriteHeader(http.StatusOK)
-		}
-	})))
-
-	// Lots API
-	mux.HandleFunc("/api/lots", corsMiddleware(authMiddleware(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if r.Method == http.MethodGet {
-			list, _ := procureUC.GetInventoryLots()
-			json.NewEncoder(w).Encode(list)
-		} else if r.Method == http.MethodPost {
-			var i models.InventoryLot
-			if err := json.NewDecoder(r.Body).Decode(&i); err != nil {
-				if serverLogger != nil { serverLogger.Printf("Lot Decode Error: %v", err) }
-				http.Error(w, err.Error(), http.StatusBadRequest)
-				return
-			}
-			if err := procureUC.SaveInventoryLot(&i); err != nil {
-				if serverLogger != nil { serverLogger.Printf("Lot Save Error: %v", err) }
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			w.WriteHeader(http.StatusOK)
-		}
-	})))
-
-	mux.HandleFunc("/api/lots/gr", corsMiddleware(authMiddleware(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if r.Method == http.MethodGet {
-			grIDStr := r.URL.Query().Get("grId")
-			var grID int
-			fmt.Sscanf(grIDStr, "%d", &grID)
-			list, _ := procureUC.GetInventoryLotsByGRID(grID)
-			json.NewEncoder(w).Encode(list)
-		}
-	})))
-
-	// Allocations API
-	mux.HandleFunc("/api/allocations", corsMiddleware(authMiddleware(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if r.Method == http.MethodGet {
-			list, _ := procureUC.GetCostAllocations()
-			json.NewEncoder(w).Encode(list)
-		} else if r.Method == http.MethodPost {
-			var i models.CostAllocation
-			if err := json.NewDecoder(r.Body).Decode(&i); err != nil {
-				if serverLogger != nil { serverLogger.Printf("Cost Allocation Decode Error: %v", err) }
-				http.Error(w, err.Error(), http.StatusBadRequest)
-				return
-			}
-			if err := procureUC.SaveCostAllocation(&i); err != nil {
-				if serverLogger != nil { serverLogger.Printf("Cost Allocation Save Error: %v", err) }
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			w.WriteHeader(http.StatusOK)
-		}
-	})))
-
-	// Bookings API
-	mux.HandleFunc("/api/bookings", corsMiddleware(authMiddleware(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if r.Method == http.MethodGet {
-			list, err := procureUC.GetBookings()
-			if err != nil {
-				fmt.Println("GetBookings Error:", err)
-			}
-			json.NewEncoder(w).Encode(list)
-		}
-	})))
-
-	mux.HandleFunc("/api/todos", corsMiddleware(authMiddleware(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		switch r.Method {
-		case http.MethodGet:
-			getTodosHandler(w, r)
-		case http.MethodPost:
-			addTodoHandler(w, r)
-		default:
-			w.WriteHeader(http.StatusMethodNotAllowed)
-		}
-	})))
+	mux.HandleFunc("/api/seed", corsMiddleware(authMiddleware(seedHandler)))
+	mux.HandleFunc("/api/items", corsMiddleware(authMiddleware(itemsHandler)))
+	mux.HandleFunc("/api/vendors", corsMiddleware(authMiddleware(vendorsHandler)))
+	mux.HandleFunc("/api/pos", corsMiddleware(authMiddleware(posHandler)))
+	mux.HandleFunc("/api/pos/items", corsMiddleware(authMiddleware(poItemsHandler)))
+	mux.HandleFunc("/api/invoices", corsMiddleware(authMiddleware(invoicesHandler)))
+	mux.HandleFunc("/api/invoices/items", corsMiddleware(authMiddleware(invoiceItemsHandler)))
+	mux.HandleFunc("/api/aps", corsMiddleware(authMiddleware(apsHandler)))
+	mux.HandleFunc("/api/containers", corsMiddleware(authMiddleware(containersHandler)))
+	mux.HandleFunc("/api/containers/items", corsMiddleware(authMiddleware(containerItemsHandler)))
+	mux.HandleFunc("/api/containers/bl", corsMiddleware(authMiddleware(containersByBLHandler)))
+	mux.HandleFunc("/api/bls", corsMiddleware(authMiddleware(blsHandler)))
+	mux.HandleFunc("/api/grs", corsMiddleware(authMiddleware(grsHandler)))
+	mux.HandleFunc("/api/lots", corsMiddleware(authMiddleware(lotsHandler)))
+	mux.HandleFunc("/api/lots/gr", corsMiddleware(authMiddleware(lotsByGRHandler)))
+	mux.HandleFunc("/api/allocations", corsMiddleware(authMiddleware(allocationsHandler)))
+	mux.HandleFunc("/api/bookings", corsMiddleware(authMiddleware(bookingsHandler)))
+	mux.HandleFunc("/api/todos", corsMiddleware(authMiddleware(todosHandler)))
 	mux.HandleFunc("/api/todos/toggle", corsMiddleware(authMiddleware(toggleTodoHandler)))
 	mux.HandleFunc("/api/todos/delete", corsMiddleware(authMiddleware(deleteTodoHandler)))
 

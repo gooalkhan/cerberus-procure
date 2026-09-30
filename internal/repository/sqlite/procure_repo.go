@@ -233,6 +233,29 @@ func migrateProcurement(db *sql.DB) error {
 					AND Status NOT IN ('Shipped', 'Cancelled')
 			  );
 		END;`,
+		`CREATE TRIGGER IF NOT EXISTS trg_sync_po_status_delete AFTER DELETE ON PO_Item
+		BEGIN
+			-- Close PO if all remaining items are Shipped or Cancelled
+			UPDATE Purchase_Order
+			SET Status = 'Closed'
+			WHERE PO_ID = OLD.PO_ID
+			  AND NOT EXISTS (
+				  SELECT 1 FROM PO_Item
+				  WHERE PO_ID = OLD.PO_ID
+					AND Status NOT IN ('Shipped', 'Cancelled')
+			  )
+			  AND EXISTS (SELECT 1 FROM PO_Item WHERE PO_ID = OLD.PO_ID);
+			
+			-- Reopen PO if any remaining item is Not Shipped or Partially Shipped
+			UPDATE Purchase_Order
+			SET Status = 'Open'
+			WHERE PO_ID = OLD.PO_ID
+			  AND EXISTS (
+				  SELECT 1 FROM PO_Item
+				  WHERE PO_ID = OLD.PO_ID
+					AND Status NOT IN ('Shipped', 'Cancelled')
+			  );
+		END;`,
 		`CREATE TRIGGER IF NOT EXISTS trg_container_item_calc_insert
 		AFTER INSERT ON Container_Item
 		BEGIN
@@ -463,6 +486,16 @@ func (r *SQLiteProcurementRepository) SavePOItem(i *models.POItem) error {
 	}
 	_, err := r.db.Exec("UPDATE PO_Item SET Item_ID=?, PO_Qty=?, Unit_Price=?, Status=?, Remark=?, Updated_By=?, Updated_At=CURRENT_TIMESTAMP WHERE PO_Item_ID=?",
 		i.ItemID, i.POQty, i.UnitPrice, i.Status, i.Remark, i.UpdatedBy, i.ID)
+	return err
+}
+
+func (r *SQLiteProcurementRepository) DeletePOItem(id int) error {
+	var count int
+	err := r.db.QueryRow("SELECT COUNT(*) FROM Container_Item WHERE PO_Item_ID = ?", id).Scan(&count)
+	if err == nil && count > 0 {
+		return fmt.Errorf("cannot delete PO item %d: referenced by %d container item(s)", id, count)
+	}
+	_, err = r.db.Exec("DELETE FROM PO_Item WHERE PO_Item_ID = ?", id)
 	return err
 }
 

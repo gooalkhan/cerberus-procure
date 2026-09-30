@@ -37,6 +37,7 @@ type ProcurementRepository interface {
 	// PO Item
 	GetPOItemsByPOID(poID int) ([]models.POItem, error)
 	SavePOItem(item *models.POItem) error
+	DeletePOItem(id int) error
 
 	// Commercial Invoice
 	GetCommercialInvoices() ([]models.CommercialInvoice, error)

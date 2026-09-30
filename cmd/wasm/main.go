@@ -302,14 +302,33 @@ func main() {
 			return nil
 		}))
 	}))
+	procureObj.Set("deletePOItem", js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		id := args[0].Int()
+		return js.Global().Get("Promise").New(js.FuncOf(func(this js.Value, pArgs []js.Value) interface{} {
+			resolve := pArgs[0]
+			reject := pArgs[1]
+			go func() {
+				if err := procureUC.DeletePOItem(id); err != nil {
+					reject.Invoke(err.Error())
+					return
+				}
+				resolve.Invoke()
+			}()
+			return nil
+		}))
+	}))
 	procureObj.Set("savePurchaseOrder", js.FuncOf(func(this js.Value, args []js.Value) interface{} {
 		jsonStr := args[0].String()
 		return js.Global().Get("Promise").New(js.FuncOf(func(this js.Value, pArgs []js.Value) interface{} {
 			resolve := pArgs[0]
+			reject := pArgs[1]
 			go func() {
 				var i models.PurchaseOrder
 				json.Unmarshal([]byte(jsonStr), &i)
-				procureUC.SavePurchaseOrder(&i)
+				if err := procureUC.SavePurchaseOrder(&i); err != nil {
+					reject.Invoke(err.Error())
+					return
+				}
 				resolve.Invoke()
 			}()
 			return nil

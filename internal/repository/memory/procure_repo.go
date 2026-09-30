@@ -2,6 +2,7 @@ package memory
 
 import (
 	"cerberus-procure/internal/models"
+	"fmt"
 	"sort"
 	"sync"
 	"time"
@@ -276,22 +277,62 @@ func (r *MemoryProcurementRepository) SavePOItem(i *models.POItem) error {
 		}
 	}
 
-	// Trigger logic: Close PO if all items are terminal
+	r.syncPOStatus(i.POID)
+	return nil
+}
+
+func (r *MemoryProcurementRepository) syncPOStatus(poID int) {
+	items := r.poItems[poID]
 	allTerminal := true
-	for _, item := range r.poItems[i.POID] {
+	for _, item := range items {
 		if item.Status != "Shipped" && item.Status != "Cancelled" {
 			allTerminal = false
 			break
 		}
 	}
-	if allTerminal && len(r.poItems[i.POID]) > 0 {
-		po := r.pos[i.POID]
+	if allTerminal && len(items) > 0 {
+		po := r.pos[poID]
 		po.Status = "Closed"
-		r.pos[i.POID] = po
+		r.pos[poID] = po
 	} else if !allTerminal {
-		po := r.pos[i.POID]
+		po := r.pos[poID]
 		po.Status = "Open"
-		r.pos[i.POID] = po
+		r.pos[poID] = po
+	}
+}
+
+func (r *MemoryProcurementRepository) DeletePOItem(id int) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	for _, cItems := range r.containerItems {
+		for _, ci := range cItems {
+			if ci.POItemID == id {
+				return fmt.Errorf("cannot delete PO item %d: referenced by container item", id)
+			}
+		}
+	}
+
+	var targetPOID int
+	for poID, items := range r.poItems {
+		newItems := make([]models.POItem, 0, len(items))
+		found := false
+		for _, item := range items {
+			if item.ID == id {
+				found = true
+				targetPOID = poID
+			} else {
+				newItems = append(newItems, item)
+			}
+		}
+		if found {
+			r.poItems[poID] = newItems
+			break
+		}
+	}
+
+	if targetPOID > 0 {
+		r.syncPOStatus(targetPOID)
 	}
 
 	return nil

@@ -17,6 +17,7 @@ declare global {
       savePurchaseOrder: (json: string) => Promise<void>;
       getPOItems: (poId: number) => Promise<string>;
       savePOItem: (json: string) => Promise<void>;
+      deletePOItem: (id: number) => Promise<void>;
       getCommercialInvoices: () => Promise<string>;
       getCIAggregatedItems: (ciId: number) => Promise<string>;
       saveCommercialInvoice: (json: string) => Promise<void>;
@@ -124,6 +125,10 @@ export const procureApi = {
     const processed = fixDates(i);
     if (isWasm()) return window.procureApi.savePOItem(JSON.stringify(processed));
     return request('/pos/items', 'POST', processed);
+  },
+  deletePOItem: async (id: number): Promise<void> => {
+    if (isWasm()) return window.procureApi.deletePOItem(id);
+    return request(`/pos/items?id=${id}`, 'DELETE');
   },
 
   // Invoices

@@ -3,6 +3,7 @@ package logic
 import (
 	"cerberus-procure/internal/models"
 	"cerberus-procure/internal/repository"
+	"fmt"
 	"github.com/google/uuid"
 )
 
@@ -61,10 +62,33 @@ func (uc *ProcurementUseCase) SavePurchaseOrder(po *models.PurchaseOrder) error 
 	if err != nil {
 		return err
 	}
-	// Save items if present
-	for i := range po.Items {
-		po.Items[i].POID = po.ID
-		uc.repo.SavePOItem(&po.Items[i])
+	// Reconcile items if present
+	if po.Items != nil {
+		if po.ID > 0 {
+			existingItems, err := uc.repo.GetPOItemsByPOID(po.ID)
+			if err == nil {
+				keepMap := make(map[int]bool)
+				for _, item := range po.Items {
+					if item.ID > 0 {
+						keepMap[item.ID] = true
+					}
+				}
+				for _, existing := range existingItems {
+					if !keepMap[existing.ID] {
+						if err := uc.repo.DeletePOItem(existing.ID); err != nil {
+							return fmt.Errorf("failed to delete removed PO item %d: %w", existing.ID, err)
+						}
+					}
+				}
+			}
+		}
+
+		for i := range po.Items {
+			po.Items[i].POID = po.ID
+			if err := uc.repo.SavePOItem(&po.Items[i]); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
@@ -76,6 +100,10 @@ func (uc *ProcurementUseCase) GetPOItemsByPOID(poID int) ([]models.POItem, error
 
 func (uc *ProcurementUseCase) SavePOItem(item *models.POItem) error {
 	return uc.repo.SavePOItem(item)
+}
+
+func (uc *ProcurementUseCase) DeletePOItem(id int) error {
+	return uc.repo.DeletePOItem(id)
 }
 
 // Commercial Invoice
