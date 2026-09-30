@@ -378,10 +378,14 @@ func main() {
 		jsonStr := args[0].String()
 		return js.Global().Get("Promise").New(js.FuncOf(func(this js.Value, pArgs []js.Value) interface{} {
 			resolve := pArgs[0]
+			reject := pArgs[1]
 			go func() {
 				var i models.ContainerItem
 				json.Unmarshal([]byte(jsonStr), &i)
-				procureUC.SaveContainerItem(&i)
+				if err := procureUC.SaveContainerItem(&i); err != nil {
+					reject.Invoke(err.Error())
+					return
+				}
 				resolve.Invoke()
 			}()
 			return nil

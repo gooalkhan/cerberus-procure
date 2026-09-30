@@ -51,6 +51,31 @@ Most modules utilize the `CrudPage` component, which provides a standardized wor
 - In order to facilitate user's manual data entry and correction, the Container_Item table supports merge and split operations.
 - If there is an AP attached to the Container_Item and user tries to merge or split it, the UI warns user that the AP will be orphaned after the merge or split operation.
 
+### 📥 Bulk Booking Import via Excel (Container Item Entry)
+- Located on the **Logistics (Bookings)** page alongside the `+ New Entry` button.
+- **Pre-filled Template Download**:
+  - Automatically queries all `Open` status Purchase Orders and their child line items (`PO_Item`).
+  - Calculates the remaining unbooked quantity for each item (`Remaining Qty = PO_Qty - SUM(Load_Qty)` across existing `Container_Item` records).
+  - Generates and downloads a pre-populated Excel (`.xlsx`) sheet containing only items with remaining unbooked quantities (`Remaining Qty > 0`).
+  - Pre-filled columns:
+    - **PO Item ID** (`po_item_id`, Mandatory, system identifier)
+    - **PO No**, **SKU Code**, **Item Name**, **Vendor** (Reference only)
+    - **Ordered Qty**, **Remaining Qty** (Reference only)
+    - **Load Qty** (Mandatory, defaulted to remaining unbooked quantity, user-editable)
+    - **Unit Price**, **Currency** (Pre-filled from PO, editable)
+    - **Container No / ID** (Optional/Input)
+    - **BL No / ID** (Optional/Input)
+    - **Temporary ETA** (Optional, date format `YYYY-MM-DD`)
+    - **Remark** (Optional)
+- **Batch Upload & Preview Confirmation**:
+  - Allows users to drag-and-drop or upload the completed Excel file.
+  - Automatically parses the data and performs row-by-row validation:
+    - Validates that `PO Item ID` exists and belongs to an active Open PO.
+    - Validates that `Load Qty` is positive and warns if it exceeds remaining unbooked quantity.
+    - Resolves Container / BL by identifier or number.
+  - Displays a **Preview & Confirmation Modal** summarizing rows to be imported, warnings (e.g., over-booking), and any error rows.
+  - Upon user confirmation, bulk-creates `Container_Item` records, which automatically triggers the database status updates for `PO_Item` and parent `Purchase_Order`.
+
 ### 🏭 Landed Goods (Unpacking)
 - A specialized interface for Goods Receipt (GR).
 - Supports "Unpacking" logic where a single shipment is split into multiple `Inventory Lots` based on SKU or physical attributes.

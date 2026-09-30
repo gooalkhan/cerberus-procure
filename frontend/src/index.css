@@ -321,6 +321,7 @@ tr:hover td {
 /* Sub Table (in Modal) */
 .sub-table {
   width: 100%;
+  min-width: unset;
   border-collapse: collapse;
   margin-top: 1rem;
   background-color: rgba(15, 23, 42, 0.3);

@@ -591,13 +591,16 @@ func (r *MemoryProcurementRepository) SaveContainerItem(i *models.ContainerItem)
 		r.nextID++
 		r.containerItems[i.ContainerID] = append(r.containerItems[i.ContainerID], *i)
 		r.updateContainerAggregation(i.ContainerID)
+		r.syncPOItemStatus(i.POItemID)
 	} else {
 		// Find and remove from old container (if exists)
 		oldContainerID := -1
+		oldPOItemID := -1
 		for cid, items := range r.containerItems {
 			for idx, item := range items {
 				if item.ID == i.ID {
 					oldContainerID = cid
+					oldPOItemID = item.POItemID
 					// Remove from old
 					r.containerItems[cid] = append(items[:idx], items[idx+1:]...)
 					break
@@ -615,8 +618,56 @@ func (r *MemoryProcurementRepository) SaveContainerItem(i *models.ContainerItem)
 		if oldContainerID != -1 && oldContainerID != i.ContainerID {
 			r.updateContainerAggregation(oldContainerID)
 		}
+
+		r.syncPOItemStatus(i.POItemID)
+		if oldPOItemID != -1 && oldPOItemID != i.POItemID {
+			r.syncPOItemStatus(oldPOItemID)
+		}
 	}
 	return nil
+}
+
+func (r *MemoryProcurementRepository) syncPOItemStatus(poItemID int) {
+	if poItemID <= 0 {
+		return
+	}
+	var totalLoadQty float64
+	for _, items := range r.containerItems {
+		for _, ci := range items {
+			if ci.POItemID == poItemID {
+				totalLoadQty += ci.LoadQty
+			}
+		}
+	}
+
+	var targetPOID int
+	for poID, items := range r.poItems {
+		for idx, pi := range items {
+			if pi.ID == poItemID {
+				if pi.Status == "Cancelled" {
+					return
+				}
+				newStatus := "Not Shipped"
+				if totalLoadQty >= pi.POQty {
+					newStatus = "Shipped"
+				} else if totalLoadQty > 0 {
+					newStatus = "Partially Shipped"
+				}
+				if pi.Status != newStatus {
+					r.poItems[poID][idx].Status = newStatus
+					targetPOID = poID
+				}
+				break
+			}
+		}
+		if targetPOID > 0 {
+			break
+		}
+	}
+
+	if targetPOID > 0 {
+		r.syncPOStatus(targetPOID)
+	}
 }
 
 func (r *MemoryProcurementRepository) updateContainerAggregation(containerID int) {

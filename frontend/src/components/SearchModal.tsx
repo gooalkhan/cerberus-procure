@@ -91,7 +91,7 @@ const SearchModal: React.FC<SearchModalProps> = ({
 
   return (
     <div className="modal-overlay" style={{ zIndex: 1100 }} onClick={onClose}>
-      <div className="modal-content" style={{ width: '600px', maxHeight: '80vh' }} onClick={e => e.stopPropagation()}>
+      <div className="modal-content" style={{ width: '850px', maxWidth: '92vw', maxHeight: '85vh' }} onClick={e => e.stopPropagation()}>
         <div className="modal-header">
           <h2>Select {currentType}</h2>
           <button className="secondary" onClick={onClose}>✕</button>
@@ -122,16 +122,16 @@ const SearchModal: React.FC<SearchModalProps> = ({
             </div>
           </div>
 
-          <div style={{ overflowY: 'auto', maxHeight: '400px', border: '1px solid var(--border-color)', borderRadius: '4px' }}>
+          <div style={{ overflowY: 'auto', overflowX: 'hidden', maxHeight: '450px', border: '1px solid var(--border-color)', borderRadius: '6px' }}>
             {loading ? (
               <div style={{ padding: '2rem', textAlign: 'center' }}>Loading...</div>
             ) : (
-              <table className="sub-table" style={{ margin: 0 }}>
+              <table className="sub-table" style={{ margin: 0, width: '100%', minWidth: 'unset', tableLayout: 'fixed' }}>
                 <thead>
                   <tr>
-                    <th>Reference No / Name</th>
-                    <th>Info</th>
-                    <th>Action</th>
+                    <th style={{ width: '38%' }}>Reference No / Name</th>
+                    <th style={{ width: '47%' }}>Info</th>
+                    <th style={{ width: '15%', textAlign: 'center' }}>Action</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -153,9 +153,9 @@ const SearchModal: React.FC<SearchModalProps> = ({
                     }
                     return (
                       <tr key={idx} style={{ cursor: 'pointer' }} onClick={() => onSelect(item)}>
-                        <td><strong>{no}</strong></td>
-                        <td style={{ fontSize: '0.85rem', opacity: 0.8 }}>{info}</td>
-                        <td><button className="secondary small">Select</button></td>
+                        <td style={{ wordBreak: 'break-word' }}><strong>{no}</strong></td>
+                        <td style={{ fontSize: '0.85rem', opacity: 0.85, wordBreak: 'break-word' }}>{info}</td>
+                        <td style={{ textAlign: 'center' }}><button className="secondary small">Select</button></td>
                       </tr>
                     )
                   })}

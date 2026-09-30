@@ -419,8 +419,16 @@ func containerItemsHandler(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(list)
 	} else if r.Method == http.MethodPost {
 		var i models.ContainerItem
-		json.NewDecoder(r.Body).Decode(&i)
-		procureUC.SaveContainerItem(&i)
+		if err := json.NewDecoder(r.Body).Decode(&i); err != nil {
+			if serverLogger != nil { serverLogger.Printf("ContainerItem Decode Error: %v", err) }
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if err := procureUC.SaveContainerItem(&i); err != nil {
+			if serverLogger != nil { serverLogger.Printf("ContainerItem Save Error: %v", err) }
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 		w.WriteHeader(http.StatusOK)
 	}
 }

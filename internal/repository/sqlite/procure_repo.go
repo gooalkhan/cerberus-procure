@@ -299,6 +299,56 @@ func migrateProcurement(db *sql.DB) error {
 				Total_Gross_Wgt = (SELECT SUM(Gross_Weight) FROM Container_Item WHERE Container_ID = OLD.Container_ID)
 			WHERE Container_ID = OLD.Container_ID AND OLD.Container_ID <> NEW.Container_ID;
 		END;`,
+		`CREATE TRIGGER IF NOT EXISTS trg_container_item_calc_delete
+		AFTER DELETE ON Container_Item
+		BEGIN
+			UPDATE Container
+			SET Total_CBM = (SELECT IFNULL(SUM(Cbm), 0) FROM Container_Item WHERE Container_ID = OLD.Container_ID),
+				Total_Net_Wgt = (SELECT IFNULL(SUM(Net_Weight), 0) FROM Container_Item WHERE Container_ID = OLD.Container_ID),
+				Total_Gross_Wgt = (SELECT IFNULL(SUM(Gross_Weight), 0) FROM Container_Item WHERE Container_ID = OLD.Container_ID)
+			WHERE Container_ID = OLD.Container_ID;
+		END;`,
+		`CREATE TRIGGER IF NOT EXISTS trg_container_item_po_item_status_insert
+		AFTER INSERT ON Container_Item
+		BEGIN
+			UPDATE PO_Item
+			SET Status = CASE 
+				WHEN (SELECT IFNULL(SUM(Load_Qty), 0) FROM Container_Item WHERE PO_Item_ID = NEW.PO_Item_ID) >= PO_Qty THEN 'Shipped'
+				WHEN (SELECT IFNULL(SUM(Load_Qty), 0) FROM Container_Item WHERE PO_Item_ID = NEW.PO_Item_ID) > 0 THEN 'Partially Shipped'
+				ELSE 'Not Shipped'
+			END
+			WHERE PO_Item_ID = NEW.PO_Item_ID AND Status != 'Cancelled';
+		END;`,
+		`CREATE TRIGGER IF NOT EXISTS trg_container_item_po_item_status_update
+		AFTER UPDATE ON Container_Item
+		BEGIN
+			UPDATE PO_Item
+			SET Status = CASE 
+				WHEN (SELECT IFNULL(SUM(Load_Qty), 0) FROM Container_Item WHERE PO_Item_ID = NEW.PO_Item_ID) >= PO_Qty THEN 'Shipped'
+				WHEN (SELECT IFNULL(SUM(Load_Qty), 0) FROM Container_Item WHERE PO_Item_ID = NEW.PO_Item_ID) > 0 THEN 'Partially Shipped'
+				ELSE 'Not Shipped'
+			END
+			WHERE PO_Item_ID = NEW.PO_Item_ID AND Status != 'Cancelled';
+
+			UPDATE PO_Item
+			SET Status = CASE 
+				WHEN (SELECT IFNULL(SUM(Load_Qty), 0) FROM Container_Item WHERE PO_Item_ID = OLD.PO_Item_ID) >= PO_Qty THEN 'Shipped'
+				WHEN (SELECT IFNULL(SUM(Load_Qty), 0) FROM Container_Item WHERE PO_Item_ID = OLD.PO_Item_ID) > 0 THEN 'Partially Shipped'
+				ELSE 'Not Shipped'
+			END
+			WHERE PO_Item_ID = OLD.PO_Item_ID AND OLD.PO_Item_ID <> NEW.PO_Item_ID AND Status != 'Cancelled';
+		END;`,
+		`CREATE TRIGGER IF NOT EXISTS trg_container_item_po_item_status_delete
+		AFTER DELETE ON Container_Item
+		BEGIN
+			UPDATE PO_Item
+			SET Status = CASE 
+				WHEN (SELECT IFNULL(SUM(Load_Qty), 0) FROM Container_Item WHERE PO_Item_ID = OLD.PO_Item_ID) >= PO_Qty THEN 'Shipped'
+				WHEN (SELECT IFNULL(SUM(Load_Qty), 0) FROM Container_Item WHERE PO_Item_ID = OLD.PO_Item_ID) > 0 THEN 'Partially Shipped'
+				ELSE 'Not Shipped'
+			END
+			WHERE PO_Item_ID = OLD.PO_Item_ID AND Status != 'Cancelled';
+		END;`,
 	}
 
 	for _, q := range queries {
