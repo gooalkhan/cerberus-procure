@@ -23,6 +23,7 @@ type MemoryProcurementRepository struct {
 	cas     map[int]models.CostAllocation
 	containerItems map[int][]models.ContainerItem
 	caItems map[int][]models.CostAllocationItem
+	apTargetGroups map[int]models.AP_TargetGroup
 	nextID int
 }
 
@@ -41,6 +42,7 @@ func NewMemoryProcurementRepository() *MemoryProcurementRepository {
 		cas:        make(map[int]models.CostAllocation),
 		containerItems: make(map[int][]models.ContainerItem),
 		caItems:    make(map[int][]models.CostAllocationItem),
+		apTargetGroups: make(map[int]models.AP_TargetGroup),
 		nextID:     10000,
 	}
 	r.seed()
@@ -729,6 +731,67 @@ func (r *MemoryProcurementRepository) GetContainersByBLID(blID int) ([]models.Co
 	return list, nil
 }
 
+// GetUnbookedPOItems 미예약 PO 항목 조회 (Open 상태 PO의 남은 수량)
+func (r *MemoryProcurementRepository) GetUnbookedPOItems() ([]models.BookingTemplateRow, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	list := []models.BookingTemplateRow{}
+
+	for _, po := range r.pos {
+		if po.Status != "Open" {
+			continue
+		}
+
+		items := r.poItems[po.ID]
+		for _, pi := range items {
+			// Calculate loaded qty
+			var loadedQty float64
+			for _, cItems := range r.containerItems {
+				for _, ci := range cItems {
+					if ci.POItemID == pi.ID {
+						loadedQty += ci.LoadQty
+					}
+				}
+			}
+
+			remainingQty := pi.POQty - loadedQty
+			if remainingQty <= 0 {
+				continue
+			}
+
+			// Get item info
+			itemName := ""
+			skuCode := ""
+			if m, ok := r.items[pi.ItemID]; ok {
+				itemName = m.Name
+				skuCode = m.SKUCode
+			}
+
+			// Get vendor name
+			vendorName := ""
+			if v, ok := r.vendors[po.VendorID]; ok {
+				vendorName = v.Name
+			}
+
+			list = append(list, models.BookingTemplateRow{
+				POItemID:     pi.ID,
+				PONo:         po.PONo,
+				SKUCode:      skuCode,
+				ItemName:     itemName,
+				VendorName:   vendorName,
+				OrderedQty:   pi.POQty,
+				RemainingQty: remainingQty,
+				LoadQty:      remainingQty,
+				UnitPrice:    pi.UnitPrice,
+				Currency:     po.Currency,
+			})
+		}
+	}
+
+	return list, nil
+}
+
 func (r *MemoryProcurementRepository) GetBookings() ([]models.BookingView, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -823,4 +886,287 @@ func (r *MemoryProcurementRepository) GetBookings() ([]models.BookingView, error
 	})
 
 	return list, nil
+}
+
+// AP Target Group (Memory mode)
+func (r *MemoryProcurementRepository) GetAPTargetGroups() ([]models.AP_TargetGroup, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	list := make([]models.AP_TargetGroup, 0, len(r.apTargetGroups))
+	for _, g := range r.apTargetGroups {
+		list = append(list, g)
+	}
+	return list, nil
+}
+
+func (r *MemoryProcurementRepository) GetAPTargetGroupByID(id int) (*models.AP_TargetGroup, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if g, ok := r.apTargetGroups[id]; ok {
+		return &g, nil
+	}
+	return nil, nil
+}
+
+func (r *MemoryProcurementRepository) GetAPTargetGroupItems(groupID int) ([]models.AP_TargetGroupItem, error) {
+	return nil, nil
+}
+
+func (r *MemoryProcurementRepository) SaveAPTargetGroup(g *models.AP_TargetGroup) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if g.ID == 0 {
+		g.ID = r.nextID
+		r.nextID++
+	}
+	r.apTargetGroups[g.ID] = *g
+	return nil
+}
+
+func (r *MemoryProcurementRepository) SaveAPTargetGroupItem(item *models.AP_TargetGroupItem) error {
+	return nil
+}
+
+func (r *MemoryProcurementRepository) DeleteAPTargetGroupItem(id int) error {
+	return nil
+}
+
+func (r *MemoryProcurementRepository) GetAllReferenceTargets() ([]models.APTargetGroupReference, error) {
+	return nil, nil
+}
+
+// CheckReferences 삭제 대상 레코드를 참조하는 다른 테이블 확인 (메모리 모드)
+func (r *MemoryProcurementRepository) CheckReferences(tableName string, id int) (*models.DeleteCheckResult, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	result := &models.DeleteCheckResult{CanDelete: true, References: []models.ReferenceInfo{}}
+
+	switch tableName {
+	case "Item_Master":
+		records := []map[string]interface{}{}
+		for _, items := range r.poItems {
+			for _, pi := range items {
+				if pi.ItemID == id {
+					records = append(records, map[string]interface{}{"PO_Item_ID": pi.ID, "PO_ID": pi.POID, "PO_Qty": pi.POQty})
+				}
+			}
+		}
+		if len(records) > 0 {
+			result.CanDelete = false
+			result.References = append(result.References, models.ReferenceInfo{TableName: "PO Items", Count: len(records), Records: records})
+			result.TotalRefs += len(records)
+		}
+
+	case "Vendor_Master":
+		records := []map[string]interface{}{}
+		for _, po := range r.pos {
+			if po.VendorID == id {
+				records = append(records, map[string]interface{}{"PO_ID": po.ID, "PO_No": po.PONo, "Status": po.Status})
+			}
+		}
+		if len(records) > 0 {
+			result.CanDelete = false
+			result.References = append(result.References, models.ReferenceInfo{TableName: "Purchase Orders", Count: len(records), Records: records})
+			result.TotalRefs += len(records)
+		}
+		records = []map[string]interface{}{}
+		for _, ci := range r.cis {
+			if ci.VendorID == id {
+				records = append(records, map[string]interface{}{"CI_ID": ci.ID, "CI_No": ci.CINo, "Status": ci.Status})
+			}
+		}
+		if len(records) > 0 {
+			result.CanDelete = false
+			result.References = append(result.References, models.ReferenceInfo{TableName: "Commercial Invoices", Count: len(records), Records: records})
+			result.TotalRefs += len(records)
+		}
+
+	case "Purchase_Order":
+		items := r.poItems[id]
+		if len(items) > 0 {
+			records := []map[string]interface{}{}
+			for _, pi := range items {
+				records = append(records, map[string]interface{}{"PO_Item_ID": pi.ID, "Item_ID": pi.ItemID, "PO_Qty": pi.POQty})
+			}
+			result.CanDelete = false
+			result.References = append(result.References, models.ReferenceInfo{TableName: "PO Items", Count: len(records), Records: records})
+			result.TotalRefs += len(records)
+		}
+
+	case "PO_Item":
+		records := []map[string]interface{}{}
+		for _, cItems := range r.containerItems {
+			for _, ci := range cItems {
+				if ci.POItemID == id {
+					records = append(records, map[string]interface{}{"Container_Item_ID": ci.ID, "Container_ID": ci.ContainerID, "Load_Qty": ci.LoadQty})
+				}
+			}
+		}
+		if len(records) > 0 {
+			result.CanDelete = false
+			result.References = append(result.References, models.ReferenceInfo{TableName: "Container Items (Bookings)", Count: len(records), Records: records})
+			result.TotalRefs += len(records)
+		}
+
+	case "Container":
+		items := r.containerItems[id]
+		if len(items) > 0 {
+			records := []map[string]interface{}{}
+			for _, ci := range items {
+				records = append(records, map[string]interface{}{"Container_Item_ID": ci.ID, "PO_Item_ID": ci.POItemID, "Load_Qty": ci.LoadQty})
+			}
+			result.CanDelete = false
+			result.References = append(result.References, models.ReferenceInfo{TableName: "Container Items (Bookings)", Count: len(records), Records: records})
+			result.TotalRefs += len(records)
+		}
+
+	case "BL":
+		records := []map[string]interface{}{}
+		for _, cItems := range r.containerItems {
+			for _, ci := range cItems {
+				if ci.BLID == id {
+					records = append(records, map[string]interface{}{"Container_Item_ID": ci.ID, "PO_Item_ID": ci.POItemID, "Load_Qty": ci.LoadQty})
+				}
+			}
+		}
+		if len(records) > 0 {
+			result.CanDelete = false
+			result.References = append(result.References, models.ReferenceInfo{TableName: "Container Items (Bookings)", Count: len(records), Records: records})
+			result.TotalRefs += len(records)
+		}
+
+	case "Container_Item":
+		records := []map[string]interface{}{}
+		for _, lot := range r.lots {
+			if lot.ContainerItemID == id {
+				records = append(records, map[string]interface{}{"Lot_ID": lot.ID, "Lot_No": lot.LotNo, "Qty": lot.Qty})
+			}
+		}
+		if len(records) > 0 {
+			result.CanDelete = false
+			result.References = append(result.References, models.ReferenceInfo{TableName: "Inventory Lots", Count: len(records), Records: records})
+			result.TotalRefs += len(records)
+		}
+
+	case "Goods_Receipt":
+		records := []map[string]interface{}{}
+		for _, lot := range r.lots {
+			if lot.GRID == id {
+				records = append(records, map[string]interface{}{"Lot_ID": lot.ID, "Lot_No": lot.LotNo, "Qty": lot.Qty})
+			}
+		}
+		if len(records) > 0 {
+			result.CanDelete = false
+			result.References = append(result.References, models.ReferenceInfo{TableName: "Inventory Lots", Count: len(records), Records: records})
+			result.TotalRefs += len(records)
+		}
+
+	case "Inventory_Lot":
+		records := []map[string]interface{}{}
+		for _, caItems := range r.caItems {
+			for _, item := range caItems {
+				if item.LotID == id {
+					records = append(records, map[string]interface{}{
+						"Cost_Allocation_Item_ID": item.ID, "Cost_Allocation_ID": item.CostAllocationID, "Allocated_Amount": item.AllocatedAmount,
+					})
+				}
+			}
+		}
+		if len(records) > 0 {
+			result.CanDelete = false
+			result.References = append(result.References, models.ReferenceInfo{TableName: "Cost Allocation Items", Count: len(records), Records: records})
+			result.TotalRefs += len(records)
+		}
+
+	case "Account_Payable":
+		records := []map[string]interface{}{}
+		for _, caItems := range r.caItems {
+			for _, item := range caItems {
+				if item.APID == id {
+					records = append(records, map[string]interface{}{
+						"Cost_Allocation_Item_ID": item.ID, "Cost_Allocation_ID": item.CostAllocationID, "Allocated_Amount": item.AllocatedAmount,
+					})
+				}
+			}
+		}
+		if len(records) > 0 {
+			result.CanDelete = false
+			result.References = append(result.References, models.ReferenceInfo{TableName: "Cost Allocation Items", Count: len(records), Records: records})
+			result.TotalRefs += len(records)
+		}
+
+	case "AP_Target_Group":
+		// Memory mode does not persist AP Target Groups
+		group, _ := r.GetAPTargetGroupByID(id)
+		if group != nil {
+			records := []map[string]interface{}{}
+			for _, ap := range r.aps {
+				if ap.ReferenceUUID == group.UUID && ap.ReferenceType == "AP_Target_Group" {
+					records = append(records, map[string]interface{}{"AP_ID": ap.ID, "AP_No": ap.APNo, "Status": ap.Status})
+				}
+			}
+			if len(records) > 0 {
+				result.CanDelete = false
+				result.References = append(result.References, models.ReferenceInfo{TableName: "Account Payables", Count: len(records), Records: records})
+				result.TotalRefs += len(records)
+			}
+		}
+	}
+
+	return result, nil
+}
+
+// DeleteRecord 지정된 테이블의 레코드 삭제 (메모리 모드)
+func (r *MemoryProcurementRepository) DeleteRecord(tableName string, id int) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	switch tableName {
+	case "Item_Master":
+		delete(r.items, id)
+	case "Vendor_Master":
+		delete(r.vendors, id)
+	case "Purchase_Order":
+		delete(r.pos, id)
+	case "PO_Item":
+		for poID, items := range r.poItems {
+			newItems := []models.POItem{}
+			for _, item := range items {
+				if item.ID != id {
+					newItems = append(newItems, item)
+				}
+			}
+			r.poItems[poID] = newItems
+		}
+	case "Commercial_Invoice":
+		delete(r.cis, id)
+	case "Container":
+		delete(r.containers, id)
+	case "BL":
+		delete(r.bls, id)
+	case "Container_Item":
+		for cID, items := range r.containerItems {
+			newItems := []models.ContainerItem{}
+			for _, item := range items {
+				if item.ID != id {
+					newItems = append(newItems, item)
+				}
+			}
+			r.containerItems[cID] = newItems
+		}
+	case "Goods_Receipt":
+		delete(r.grs, id)
+	case "Inventory_Lot":
+		delete(r.lots, id)
+	case "Account_Payable":
+		delete(r.aps, id)
+	case "Cost_Allocation":
+		delete(r.cas, id)
+	case "AP_Target_Group":
+		delete(r.apTargetGroups, id)
+	default:
+		return fmt.Errorf("unsupported table: %s", tableName)
+	}
+	return nil
 }

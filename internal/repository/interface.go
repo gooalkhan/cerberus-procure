@@ -76,4 +76,20 @@ type ProcurementRepository interface {
 
 	// Unified Views
 	GetBookings() ([]models.BookingView, error)
+
+	// Booking Template
+	GetUnbookedPOItems() ([]models.BookingTemplateRow, error)
+
+	// Delete & Reference Check
+	CheckReferences(tableName string, id int) (*models.DeleteCheckResult, error)
+	DeleteRecord(tableName string, id int) error
+
+	// AP Target Group
+	GetAPTargetGroups() ([]models.AP_TargetGroup, error)
+	GetAPTargetGroupByID(id int) (*models.AP_TargetGroup, error)
+	GetAPTargetGroupItems(groupID int) ([]models.AP_TargetGroupItem, error)
+	SaveAPTargetGroup(group *models.AP_TargetGroup) error
+	SaveAPTargetGroupItem(item *models.AP_TargetGroupItem) error
+	DeleteAPTargetGroupItem(id int) error
+	GetAllReferenceTargets() ([]models.APTargetGroupReference, error)
 }

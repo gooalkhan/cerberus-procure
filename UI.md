@@ -94,7 +94,8 @@ Most modules utilize the `CrudPage` component, which provides a standardized wor
 - AP Allocation can be done on a single lot, which is the minimal unit of AP allocation. User can use CI, BL, Container, GR, Lot as a reference of batch import of its lots.
 
 ### AP Association
-- AP can be associated with PO, CI, BL, Container, Container_Item, GR, Lot. User must explicitly specify the association. the association is based on UUID which is given to the target of the AP linkage.
+- AP can be associated with PO, CI, BL, Container, Container_Item, GR, Lot, or **AP Target Group**. User must explicitly specify the association. the association is based on UUID which is given to the target of the AP linkage.
+- **AP Target Group**: A dedicated interface allows users to group **multiple documents of the same type** (multiple POs, multiple CIs, multiple BLs, multiple Containers, multiple Container_Items, multiple GRs, or multiple Lots) into a single logical AP target with its own UUID. The group is defined by a selected `Reference_Type`, and only references of that type can be added. This grouped UUID can then be selected when issuing a single AP that covers multiple underlying documents of the same kind. The group detail view lists all grouped references and their allocated amounts.
 - Whenever the target is deleted, the System will warn the user that the AP will be orphaned after the deletion. A revision to PO, CI, BL, Container does not effect its given UUID, but a revision to Container_Item, Lot will effect its given UUID. So the System should warn the user that the AP will be orphaned after the revision.
 
 ### Shipment Tracking Monitor

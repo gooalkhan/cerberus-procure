@@ -190,3 +190,96 @@ export interface BookingView {
   temporary_eta: string | null;
   remark: string;
 }
+
+// Bulk Booking Import
+export interface BookingTemplateRow {
+  po_item_id: number;
+  po_no: string;
+  sku_code: string;
+  item_name: string;
+  vendor_name: string;
+  ordered_qty: number;
+  remaining_qty: number;
+  load_qty: number;
+  unit_price: number;
+  currency: string;
+  container_no: string;
+  container_id: number;
+  bl_no: string;
+  bl_id: number;
+  temporary_eta: string;
+  remark: string;
+}
+
+export interface BulkImportRow {
+  po_item_id: number;
+  load_qty: number;
+  unit_price: number;
+  currency: string;
+  container_no: string;
+  container_id: number;
+  bl_no: string;
+  bl_id: number;
+  temporary_eta: string;
+  remark: string;
+}
+
+export interface BulkImportPreview {
+  valid_rows: BulkImportPreviewRow[];
+  error_rows: BulkImportPreviewRow[];
+  warn_rows: BulkImportPreviewRow[];
+  total_count: number;
+  valid_count: number;
+  error_count: number;
+  warn_count: number;
+}
+
+export interface BulkImportPreviewRow {
+  row_number: number;
+  po_item_id: number;
+  po_no: string;
+  item_name: string;
+  load_qty: number;
+  remaining_qty: number;
+  unit_price: number;
+  currency: string;
+  container_no: string;
+  container_id: number;
+  bl_no: string;
+  bl_id: number;
+  temporary_eta: string;
+  remark: string;
+  status: 'valid' | 'error' | 'warn';
+  message: string;
+}
+
+// AP Target Group
+export interface AP_TargetGroup {
+  ap_target_group_id: number;
+  group_no: string;
+  group_name: string;
+  reference_type: string;
+  status: string;
+  remark: string;
+  uuid: string;
+  items?: AP_TargetGroupItem[];
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface AP_TargetGroupItem {
+  ap_target_group_item_id: number;
+  ap_target_group_id: number;
+  reference_uuid: string;
+  allocated_amount: number;
+  remark: string;
+}
+
+export interface APTargetGroupReference {
+  reference_uuid: string;
+  reference_type: string;
+  reference_no: string;
+  description: string;
+  amount: number;
+  currency: string;
+}

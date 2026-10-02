@@ -4,6 +4,8 @@ import (
 	"cerberus-procure/internal/models"
 	"cerberus-procure/internal/repository"
 	"fmt"
+	"time"
+
 	"github.com/google/uuid"
 )
 
@@ -131,6 +133,10 @@ func (uc *ProcurementUseCase) SaveAccountPayable(ap *models.AccountPayable) erro
 	if ap.UUID == "" {
 		ap.UUID = uuid.New().String()
 	}
+	// Payment Date가 입력되면 Pay Status를 paid로 자동 변경
+	if !ap.DateOfPayment.IsZero() {
+		ap.Status = "paid"
+	}
 	return uc.repo.SaveAccountPayable(ap)
 }
 
@@ -219,4 +225,88 @@ func (uc *ProcurementUseCase) GetContainersByBLID(blID int) ([]models.Container,
 
 func (uc *ProcurementUseCase) GetBookings() ([]models.BookingView, error) {
 	return uc.repo.GetBookings()
+}
+
+// GetBookingTemplateData 엑셀 템플릿용 미예약 PO 항목 데이터 조회
+func (uc *ProcurementUseCase) GetBookingTemplateData() ([]models.BookingTemplateRow, error) {
+	return uc.repo.GetUnbookedPOItems()
+}
+
+// BulkCreateContainerItems 대량으로 Container_Item 레코드 생성
+func (uc *ProcurementUseCase) BulkCreateContainerItems(rows []models.BulkImportRow) (created int, err error) {
+	for _, row := range rows {
+		item := &models.ContainerItem{
+			POItemID:    row.POItemID,
+			ContainerID: row.ContainerID,
+			BLID:        row.BLID,
+			LoadQty:     row.LoadQty,
+			UnitPrice:   row.UnitPrice,
+			Currency:    row.Currency,
+			UUID:        "",
+			Remark:      row.Remark,
+		}
+
+		if row.TemporaryETA != "" {
+			t, parseErr := time.Parse("2006-01-02", row.TemporaryETA)
+			if parseErr == nil {
+				item.TemporaryETA = t
+			}
+		}
+
+		if err := uc.SaveContainerItem(item); err != nil {
+			return created, fmt.Errorf("failed to create container item for PO Item %d: %w", row.POItemID, err)
+		}
+		created++
+	}
+	return created, nil
+}
+
+// CheckReferences 삭제 가능 여부 확인
+func (uc *ProcurementUseCase) CheckReferences(tableName string, id int) (*models.DeleteCheckResult, error) {
+	return uc.repo.CheckReferences(tableName, id)
+}
+
+// DeleteRecord 레코드 삭제
+func (uc *ProcurementUseCase) DeleteRecord(tableName string, id int) error {
+	return uc.repo.DeleteRecord(tableName, id)
+}
+
+// AP Target Group
+func (uc *ProcurementUseCase) GetAPTargetGroups() ([]models.AP_TargetGroup, error) {
+	return uc.repo.GetAPTargetGroups()
+}
+
+func (uc *ProcurementUseCase) GetAPTargetGroupByID(id int) (*models.AP_TargetGroup, error) {
+	return uc.repo.GetAPTargetGroupByID(id)
+}
+
+func (uc *ProcurementUseCase) SaveAPTargetGroup(g *models.AP_TargetGroup) error {
+	if g.UUID == "" {
+		g.UUID = uuid.New().String()
+	}
+	if err := uc.repo.SaveAPTargetGroup(g); err != nil {
+		return err
+	}
+	// Save items if present
+	if g.Items != nil {
+		for i := range g.Items {
+			g.Items[i].GroupID = g.ID
+			if err := uc.repo.SaveAPTargetGroupItem(&g.Items[i]); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (uc *ProcurementUseCase) SaveAPTargetGroupItem(item *models.AP_TargetGroupItem) error {
+	return uc.repo.SaveAPTargetGroupItem(item)
+}
+
+func (uc *ProcurementUseCase) DeleteAPTargetGroupItem(id int) error {
+	return uc.repo.DeleteAPTargetGroupItem(id)
+}
+
+func (uc *ProcurementUseCase) GetAllReferenceTargets() ([]models.APTargetGroupReference, error) {
+	return uc.repo.GetAllReferenceTargets()
 }

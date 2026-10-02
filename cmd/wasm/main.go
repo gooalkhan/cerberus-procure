@@ -533,6 +533,180 @@ func main() {
 		}))
 	}))
 
+	procureObj.Set("getBookingTemplate", js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		return js.Global().Get("Promise").New(js.FuncOf(func(this js.Value, pArgs []js.Value) interface{} {
+			resolve := pArgs[0]
+			reject := pArgs[1]
+			go func() {
+				data, err := procureUC.GetBookingTemplateData()
+				if err != nil {
+					reject.Invoke(err.Error())
+					return
+				}
+				b, _ := json.Marshal(data)
+				resolve.Invoke(string(b))
+			}()
+			return nil
+		}))
+	}))
+
+	procureObj.Set("bulkImportBookings", js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		jsonStr := args[0].String()
+		return js.Global().Get("Promise").New(js.FuncOf(func(this js.Value, pArgs []js.Value) interface{} {
+			resolve := pArgs[0]
+			reject := pArgs[1]
+			go func() {
+				var rows []models.BulkImportRow
+				if err := json.Unmarshal([]byte(jsonStr), &rows); err != nil {
+					reject.Invoke(err.Error())
+					return
+				}
+				created, err := procureUC.BulkCreateContainerItems(rows)
+				if err != nil {
+					reject.Invoke(err.Error())
+					return
+				}
+				result := map[string]interface{}{
+					"created": created,
+					"total":   len(rows),
+				}
+				b, _ := json.Marshal(result)
+				resolve.Invoke(string(b))
+			}()
+			return nil
+		}))
+	}))
+
+	procureObj.Set("checkReferences", js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		tableName := args[0].String()
+		id := args[1].Int()
+		return js.Global().Get("Promise").New(js.FuncOf(func(this js.Value, pArgs []js.Value) interface{} {
+			resolve := pArgs[0]
+			reject := pArgs[1]
+			go func() {
+				result, err := procureUC.CheckReferences(tableName, id)
+				if err != nil {
+					reject.Invoke(err.Error())
+					return
+				}
+				b, _ := json.Marshal(result)
+				resolve.Invoke(string(b))
+			}()
+			return nil
+		}))
+	}))
+
+	procureObj.Set("deleteRecord", js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		tableName := args[0].String()
+		id := args[1].Int()
+		return js.Global().Get("Promise").New(js.FuncOf(func(this js.Value, pArgs []js.Value) interface{} {
+			resolve := pArgs[0]
+			reject := pArgs[1]
+			go func() {
+				if err := procureUC.DeleteRecord(tableName, id); err != nil {
+					reject.Invoke(err.Error())
+					return
+				}
+				resolve.Invoke()
+			}()
+			return nil
+		}))
+	}))
+
+	procureObj.Set("getAPTargetGroups", js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		return js.Global().Get("Promise").New(js.FuncOf(func(this js.Value, pArgs []js.Value) interface{} {
+			resolve := pArgs[0]
+			reject := pArgs[1]
+			go func() {
+				list, err := procureUC.GetAPTargetGroups()
+				if err != nil {
+					reject.Invoke(err.Error())
+					return
+				}
+				b, _ := json.Marshal(list)
+				resolve.Invoke(string(b))
+			}()
+			return nil
+		}))
+	}))
+
+	procureObj.Set("saveAPTargetGroup", js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		jsonStr := args[0].String()
+		return js.Global().Get("Promise").New(js.FuncOf(func(this js.Value, pArgs []js.Value) interface{} {
+			resolve := pArgs[0]
+			reject := pArgs[1]
+			go func() {
+				var g models.AP_TargetGroup
+				if err := json.Unmarshal([]byte(jsonStr), &g); err != nil {
+					reject.Invoke(err.Error())
+					return
+				}
+				if err := procureUC.SaveAPTargetGroup(&g); err != nil {
+					reject.Invoke(err.Error())
+					return
+				}
+				b, _ := json.Marshal(g)
+				resolve.Invoke(string(b))
+			}()
+			return nil
+		}))
+	}))
+
+	procureObj.Set("saveAPTargetGroupItem", js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		jsonStr := args[0].String()
+		return js.Global().Get("Promise").New(js.FuncOf(func(this js.Value, pArgs []js.Value) interface{} {
+			resolve := pArgs[0]
+			reject := pArgs[1]
+			go func() {
+				var item models.AP_TargetGroupItem
+				if err := json.Unmarshal([]byte(jsonStr), &item); err != nil {
+					reject.Invoke(err.Error())
+					return
+				}
+				if err := procureUC.SaveAPTargetGroupItem(&item); err != nil {
+					reject.Invoke(err.Error())
+					return
+				}
+				b, _ := json.Marshal(item)
+				resolve.Invoke(string(b))
+			}()
+			return nil
+		}))
+	}))
+
+	procureObj.Set("deleteAPTargetGroupItem", js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		id := args[0].Int()
+		return js.Global().Get("Promise").New(js.FuncOf(func(this js.Value, pArgs []js.Value) interface{} {
+			resolve := pArgs[0]
+			reject := pArgs[1]
+			go func() {
+				if err := procureUC.DeleteAPTargetGroupItem(id); err != nil {
+					reject.Invoke(err.Error())
+					return
+				}
+				resolve.Invoke()
+			}()
+			return nil
+		}))
+	}))
+
+	procureObj.Set("getAPTargetGroupReferences", js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		return js.Global().Get("Promise").New(js.FuncOf(func(this js.Value, pArgs []js.Value) interface{} {
+			resolve := pArgs[0]
+			reject := pArgs[1]
+			go func() {
+				list, err := procureUC.GetAllReferenceTargets()
+				if err != nil {
+					reject.Invoke(err.Error())
+					return
+				}
+				b, _ := json.Marshal(list)
+				resolve.Invoke(string(b))
+			}()
+			return nil
+		}))
+	}))
+
 	js.Global().Set("procureApi", procureObj)
 
 	select {}

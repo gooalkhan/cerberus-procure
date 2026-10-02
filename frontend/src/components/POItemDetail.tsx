@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { POItem, PurchaseOrder } from '../api/models';
 import { procureApi } from '../api/procureApi';
+import SearchModal from './SearchModal';
 
 interface POItemDetailProps {
   po: PurchaseOrder;
@@ -12,12 +13,23 @@ const POItemDetail: React.FC<POItemDetailProps> = ({ po, onChange }) => {
   const [loading, setLoading] = useState(false);
   const [aps, setAps] = useState<any[]>([]);
   const [newAp, setNewAp] = useState({ ap_no: '', currency: po.currency || 'USD', amount: 0, due_date: null as string | null });
+  const [itemSearchOpen, setItemSearchOpen] = useState(false);
+  const [itemMasterMap, setItemMasterMap] = useState<Map<number, { name: string; sku_code: string }>>(new Map());
 
   useEffect(() => {
     if (po.po_id && (!po.items || po.items.length === 0)) {
       loadItems();
     }
   }, [po.po_id]);
+
+  // Load item master data for display
+  useEffect(() => {
+    procureApi.getItems().then(allItems => {
+      const map = new Map<number, { name: string; sku_code: string }>();
+      allItems.forEach(it => map.set(it.item_id, { name: it.name, sku_code: it.sku_code }));
+      setItemMasterMap(map);
+    });
+  }, []);
 
   const loadItems = async () => {
     setLoading(true);
@@ -77,10 +89,14 @@ const POItemDetail: React.FC<POItemDetailProps> = ({ po, onChange }) => {
   };
 
   const handleAddItem = () => {
+    setItemSearchOpen(true);
+  };
+
+  const handleSelectItem = (selectedItem: any) => {
     const newItem: POItem = {
       po_item_id: 0,
       po_id: po.po_id,
-      item_id: 0,
+      item_id: selectedItem.item_id,
       po_qty: 0,
       unit_price: 0,
       status: 'Not Shipped',
@@ -89,12 +105,18 @@ const POItemDetail: React.FC<POItemDetailProps> = ({ po, onChange }) => {
     const newItems = [...items, newItem];
     setItems(newItems);
     updateParent(newItems);
+    setItemSearchOpen(false);
   };
 
   const handleRemoveItem = (idx: number) => {
     const newItems = items.filter((_, i) => i !== idx);
     setItems(newItems);
     updateParent(newItems);
+  };
+
+  const getItemName = (itemId: number) => {
+    const item = itemMasterMap.get(itemId);
+    return item ? `${item.sku_code} - ${item.name}` : `Item ID: ${itemId}`;
   };
 
   return (
@@ -110,7 +132,7 @@ const POItemDetail: React.FC<POItemDetailProps> = ({ po, onChange }) => {
           <table>
             <thead>
               <tr>
-                <th>Item ID</th>
+                <th>Item</th>
                 <th>Qty</th>
                 <th>Price</th>
                 <th>Amount</th>
@@ -122,13 +144,13 @@ const POItemDetail: React.FC<POItemDetailProps> = ({ po, onChange }) => {
             <tbody>
               {items.map((item, idx) => (
                 <tr key={idx}>
-                  <td>
-                    <input 
-                      type="number" 
-                      value={item.item_id || ''} 
-                      style={{ width: '80px', padding: '0.3rem' }}
-                      onChange={(e) => handleItemChange(idx, 'item_id', Number(e.target.value))}
-                    />
+                  <td style={{ minWidth: '180px' }}>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                      ID: {item.item_id}
+                    </div>
+                    <div style={{ fontWeight: 500 }}>
+                      {getItemName(item.item_id)}
+                    </div>
                   </td>
                   <td>
                     <input 
@@ -186,12 +208,21 @@ const POItemDetail: React.FC<POItemDetailProps> = ({ po, onChange }) => {
               )}
               {items.length === 0 && (
                 <tr>
-                  <td colSpan={7} style={{ textAlign: 'center', padding: '1rem' }}>No items added</td>
+                  <td colSpan={7} style={{ textAlign: 'center', padding: '1rem' }}>No items added. Click "+ Add Item" to select from Item Master.</td>
                 </tr>
               )}
             </tbody>
           </table>
         </div>
+      )}
+
+      {itemSearchOpen && (
+        <SearchModal
+          type="Item"
+          searchTerm=""
+          onClose={() => setItemSearchOpen(false)}
+          onSelect={handleSelectItem}
+        />
       )}
 
       {/* Associated Account Payables Section */}

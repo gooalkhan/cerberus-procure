@@ -55,6 +55,11 @@ export const logout = async () => {
   if (isWasm()) {
     localStorage.removeItem('session_user');
   } else {
+    try {
+      await fetch('/api/logout', { method: 'POST', credentials: 'include' });
+    } catch (e) {
+      // ignore network errors; still clear local cookie as fallback
+    }
     document.cookie = "session_id=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
   }
   window.location.reload();

@@ -6,11 +6,15 @@ import Sidebar from './components/Sidebar'
 import CrudPage from './components/CrudPage'
 import POItemDetail from './components/POItemDetail'
 import SearchModal from './components/SearchModal'
+import BulkBookingImport from './components/BulkBookingImport'
+import AP_TargetGroupDetail from './components/APTargetGroupDetail'
 
 function App() {
   const [user, setUser] = useState<User | null>(null)
   const [activeMenu, setActiveMenu] = useState('items')
   const [loading, setLoading] = useState(true)
+  const [showBulkImport, setShowBulkImport] = useState(false)
+  const [bookingsRefreshKey, setBookingsRefreshKey] = useState(0)
 
   useEffect(() => {
     getSession().then(u => {
@@ -37,6 +41,7 @@ function App() {
           <CrudPage
             title="Item Master"
             columns={[
+              { key: 'item_id', label: 'ID', formHidden: true, filterType: 'none' },
               { key: 'sku_code', label: 'SKU Code' },
               { key: 'name', label: 'Name' },
               { key: 'vendor_id', label: 'Vendor ID', type: 'number', searchType: 'Vendor' },
@@ -47,6 +52,8 @@ function App() {
             fetchData={procureApi.getItems}
             onSave={procureApi.saveItem}
             emptyItem={{ item_id: 0, sku_code: '', name: '', vendor_id: 0, cbm: 0, net_weight: 0, gross_weight: 0, remark: '' }}
+            tableName="Item_Master"
+            idField="item_id"
           />
         )
       case 'vendors':
@@ -54,6 +61,7 @@ function App() {
           <CrudPage
             title="Vendor Master"
             columns={[
+              { key: 'vendor_id', label: 'ID', formHidden: true, filterType: 'none' },
               { key: 'name', label: 'Name' },
               { key: 'category', label: 'Category' },
               { key: 'business_reg_no', label: 'Reg No' },
@@ -64,6 +72,8 @@ function App() {
             onSave={procureApi.saveVendor}
             emptyItem={{ vendor_id: 0, name: '', category: 'Supplier', business_reg_no: '', bank_account: '', remark: '' }}
             renderDetail={(vendor) => <VendorDetail vendor={vendor} />}
+            tableName="Vendor_Master"
+            idField="vendor_id"
           />
         )
       case 'pos':
@@ -71,6 +81,7 @@ function App() {
           <CrudPage
             title="Purchase Orders"
             columns={[
+              { key: 'po_id', label: 'ID', formHidden: true, filterType: 'none' },
               { key: 'po_no', label: 'PO No' },
               { key: 'po_date', label: 'PO Date', type: 'date' },
               { key: 'vendor_id', label: 'Vendor ID', type: 'number', searchType: 'Vendor' },
@@ -83,13 +94,26 @@ function App() {
             onSave={procureApi.savePurchaseOrder}
             emptyItem={{ po_id: 0, po_no: '', po_date: new Date().toISOString(), vendor_id: 0, currency: 'USD', total_amount: 0, status: 'Open', remark: '', uuid: '' }}
             renderDetail={(po, onChange) => <POItemDetail po={po} onChange={onChange} />}
+            tableName="Purchase_Order"
+            idField="po_id"
           />
         )
       case 'logistics':
         return (
-          <CrudPage
-            title="Bookings"
-            columns={[
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '1rem' }}>
+              <button
+                className="secondary"
+                onClick={() => setShowBulkImport(true)}
+                style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+              >
+                📥 Bulk Import via Excel
+              </button>
+            </div>
+            <CrudPage
+              key={`bookings-${bookingsRefreshKey}`}
+              title="Bookings"
+              columns={[
               { key: 'container_item_id', label: 'ID', formHidden: true, filterType: 'none' },
               { key: 'container_no', label: 'Container No', formHidden: true },
               { key: 'bl_no', label: 'BL No', formHidden: true },
@@ -103,11 +127,34 @@ function App() {
               { key: 'item_name', label: 'Item Name', formHidden: true },
               { key: 'divider_1', label: '', divider: true },
               { key: 'load_qty', label: 'Load Qty', type: 'number', filterType: 'none' },
+              { key: 'unit_price', label: 'Unit Price', type: 'number', tableHidden: true },
+              { key: 'currency', label: 'Billing Currency', tableHidden: true },
               { key: 'cbm', label: 'CBM', type: 'number', formHidden: true },
               { key: 'temporary_eta', label: 'Temporary ETA', type: 'date', filterType: 'none', tableHidden: true },
               { key: 'remark', label: 'Remark', fullWidth: true },
             ]}
             fetchData={procureApi.getBookings}
+            onFieldChange={async (field, value, currentItem) => {
+              if (field === 'po_item_id' && value > 0) {
+                try {
+                  // Find the PO that contains this PO Item
+                  const pos = await procureApi.getPurchaseOrders();
+                  for (const po of pos) {
+                    const poItems = await procureApi.getPOItems(po.po_id);
+                    const found = poItems.find(pi => pi.po_item_id === value);
+                    if (found) {
+                      return {
+                        unit_price: found.unit_price,
+                        currency: po.currency,
+                      };
+                    }
+                  }
+                } catch (e) {
+                  console.error('Failed to fetch PO item details', e);
+                }
+              }
+              return null;
+            }}
             onSave={async (booking: any) => {
               await procureApi.saveContainerItem({
                 container_item_id: booking.container_item_id,
@@ -128,13 +175,17 @@ function App() {
             }}
             emptyItem={{ container_item_id: 0, container_id: 0, container_no: '', status: 'Loaded', total_cbm: 0, total_net_wgt: 0, total_gross_wgt: 0, bl_id: 0, bl_no: '', bl_status: 'Released', etd: null, eta: null, pol: '', pod: '', carrier: '', vessel_name: '', po_item_id: 0, item_id: 0, ci_id: 0, load_qty: 0, unit_price: 0, currency: 'USD', gross_weight: 0, net_weight: 0, cbm: 0, temporary_eta: null, uuid: '', remark: '' }}
             renderDetail={(booking) => <BookingFlow booking={booking} />}
-          />
+            tableName="Container_Item"
+            idField="container_item_id"
+            />
+          </div>
         )
       case 'bls':
         return (
           <CrudPage
             title="BL Management"
             columns={[
+              { key: 'bl_id', label: 'ID', formHidden: true, filterType: 'none' },
               { key: 'bl_no', label: 'BL No' },
               { key: 'status', label: 'Status', filterType: 'select', filterOptions: ['Released', 'Partially Shipping', 'Shipping', 'Partially Arrived', 'Arrived'] },
               { key: 'etd', label: 'ETD', type: 'date' },
@@ -149,6 +200,8 @@ function App() {
             onSave={procureApi.saveBL}
             emptyItem={{ bl_id: 0, bl_no: '', etd: new Date().toISOString(), eta: new Date().toISOString(), pol: '', pod: '', carrier: '', vessel_name: '', status: 'Released', remark: '', uuid: '' }}
             renderDetail={(bl) => <BLDetail bl={bl} />}
+            tableName="BL"
+            idField="bl_id"
           />
         )
       case 'containers':
@@ -156,6 +209,7 @@ function App() {
           <CrudPage
             title="Container Master"
             columns={[
+              { key: 'container_id', label: 'ID', formHidden: true, filterType: 'none' },
               { key: 'container_no', label: 'Container No' },
               { key: 'status', label: 'Status', filterType: 'select', filterOptions: ['Loaded', 'Shipping', 'Arrived'] },
               { key: 'total_cbm', label: 'Total CBM', type: 'number', formHidden: true },
@@ -167,6 +221,8 @@ function App() {
             onSave={procureApi.saveContainer}
             emptyItem={{ container_id: 0, container_no: '', status: 'Loaded', total_cbm: 0, total_net_wgt: 0, total_gross_wgt: 0, remark: '', uuid: '' }}
             renderDetail={(container) => <ContainerDetail container={container} />}
+            tableName="Container"
+            idField="container_id"
           />
         )
       case 'invoices':
@@ -174,6 +230,7 @@ function App() {
           <CrudPage
             title="Commercial Invoices"
             columns={[
+              { key: 'ci_id', label: 'ID', formHidden: true, filterType: 'none' },
               { key: 'ci_no', label: 'Invoice No' },
               { key: 'invoice_date', label: 'Invoice Date', type: 'date' },
               { key: 'vendor_id', label: 'Vendor ID', type: 'number', searchType: 'Vendor' },
@@ -186,6 +243,8 @@ function App() {
             onSave={procureApi.saveCommercialInvoice}
             emptyItem={{ ci_id: 0, ci_no: '', invoice_date: new Date().toISOString(), vendor_id: 0, currency: 'USD', total_amount: 0, status: 'Draft', remark: '', uuid: '' }}
             renderDetail={(ci) => <CIDetail ci={ci} />}
+            tableName="Commercial_Invoice"
+            idField="ci_id"
           />
         )
       case 'aps':
@@ -193,11 +252,12 @@ function App() {
           <CrudPage
             title="Account Payables"
             columns={[
+              { key: 'ap_id', label: 'ID', formHidden: true, filterType: 'none' },
               { key: 'ap_no', label: 'AP No' },
               { key: 'vendor_id', label: 'Vendor ID', type: 'number', searchType: 'Vendor' },
               { key: 'amount', label: 'Amount', type: 'number', filterType: 'none' },
-              { key: 'currency', label: 'Currency' },
-              { key: 'local_amount', label: 'Local Amount', type: 'number', filterType: 'none' },
+              { key: 'currency', label: 'Billing Currency' },
+              { key: 'local_amount', label: 'Local Amount (Korean Won)', type: 'number', filterType: 'none' },
               { key: 'due_date', label: 'Due Date', type: 'date' },
               { key: 'date_of_payment', label: 'Payment Date', type: 'date', filterType: 'none' },
               { key: 'status', label: 'Pay Status', filterType: 'select', filterOptions: ['paid', 'unpaid'] },
@@ -208,6 +268,39 @@ function App() {
             onSave={procureApi.saveAccountPayable}
             emptyItem={{ ap_id: 0, vendor_id: 0, ap_no: '', amount: 0, currency: 'USD', local_amount: 0, allocation_type: 'Value', reference_uuid: '', reference_type: 'PO', due_date: new Date().toISOString(), date_of_payment: null, status: 'unpaid', allocation_status: 'Draft', remark: '', uuid: '' }}
             renderDetail={(ap, onChange) => <APDetail ap={ap} onChange={onChange} />}
+            tableName="Account_Payable"
+            idField="ap_id"
+          />
+        )
+      case 'ap_target_groups':
+        return (
+          <CrudPage
+            title="AP Target Groups"
+            columns={[
+              { key: 'ap_target_group_id', label: 'ID', formHidden: true, filterType: 'none' },
+              { key: 'group_no', label: 'Group No' },
+              { key: 'group_name', label: 'Group Name' },
+              { key: 'reference_type', label: 'Reference Type', type: 'select', options: ['PO', 'CI', 'BL', 'Container', 'Container Item', 'GR', 'Lot'], filterType: 'select', filterOptions: ['PO', 'CI', 'BL', 'Container', 'Container Item', 'GR', 'Lot'] },
+              { key: 'status', label: 'Status', filterType: 'select', filterOptions: ['Draft', 'Open', 'Closed'] },
+              { key: 'remark', label: 'Remark', fullWidth: true },
+            ]}
+            fetchData={procureApi.getAPTargetGroups}
+            onSave={async (group: any) => {
+              await procureApi.saveAPTargetGroup({
+                ap_target_group_id: group.ap_target_group_id,
+                group_no: group.group_no,
+                group_name: group.group_name,
+                reference_type: group.reference_type,
+                status: group.status,
+                remark: group.remark,
+                uuid: group.uuid,
+                items: group.items,
+              });
+            }}
+            emptyItem={{ ap_target_group_id: 0, group_no: '', group_name: '', reference_type: 'PO', status: 'Draft', remark: '', uuid: '', items: [] }}
+            renderDetail={(group, onChange) => <AP_TargetGroupDetail group={group} onChange={onChange} />}
+            tableName="AP_Target_Group"
+            idField="ap_target_group_id"
           />
         )
       case 'inventory':
@@ -215,26 +308,20 @@ function App() {
           <CrudPage
             title="Landed Goods"
             columns={[
+              { key: 'gr_id', label: 'ID', formHidden: true, filterType: 'none' },
               { key: 'receive_date', label: 'Receive Date', type: 'date' },
               { key: 'remark', label: 'Remark', fullWidth: true },
               { key: 'divider_lots', label: '', divider: true },
             ]}
             fetchData={procureApi.getGoodsReceipts}
             onSave={async (gr: any) => {
-              // Simple save: GR first
               await procureApi.saveGoodsReceipt(gr);
-              // Lots are handled in the component via renderDetail's onChange
-              // But we need to make sure they are saved too.
-              // For simplicity, we'll save them one by one if they have changes.
               if (gr.lots) {
                 for (const lot of gr.lots) {
-                  // We need the gr_id. If it's a new GR, we might need a better way.
-                  // For now, assume gr_id is present if it's an edit, 
-                  // or find the last GR if it's new.
                   let targetGrId = gr.gr_id;
                   if (!targetGrId) {
                     const allGrs = await procureApi.getGoodsReceipts();
-                    const lastGr = allGrs[allGrs.length - 1]; // Naive approach
+                    const lastGr = allGrs[allGrs.length - 1];
                     targetGrId = lastGr.gr_id;
                   }
                   await procureApi.saveInventoryLot({ ...lot, gr_id: targetGrId });
@@ -243,6 +330,8 @@ function App() {
             }}
             emptyItem={{ gr_id: 0, receive_date: new Date().toISOString(), remark: '', lots: [] }}
             renderDetail={(gr, onChange) => <LandedGoodsDetail gr={gr} onChange={onChange} />}
+            tableName="Goods_Receipt"
+            idField="gr_id"
           />
         )
       case 'allocations':
@@ -250,6 +339,7 @@ function App() {
           <CrudPage
             title="Cost Allocations"
             columns={[
+              { key: 'cost_allocation_id', label: 'ID', formHidden: true, filterType: 'none' },
               { key: 'allocation_date', label: 'Date', type: 'date' },
               { key: 'total_allocated_amount', label: 'Total Amount', type: 'number' },
               { key: 'remark', label: 'Remark', fullWidth: true },
@@ -257,6 +347,8 @@ function App() {
             fetchData={procureApi.getCostAllocations}
             onSave={procureApi.saveCostAllocation}
             emptyItem={{ cost_allocation_id: 0, allocation_date: new Date().toISOString(), total_allocated_amount: 0, remark: '' }}
+            tableName="Cost_Allocation"
+            idField="cost_allocation_id"
           />
         )
       default:
@@ -278,6 +370,12 @@ function App() {
           {renderContent()}
         </div>
       </div>
+      {showBulkImport && (
+        <BulkBookingImport onComplete={() => {
+          setShowBulkImport(false);
+          setBookingsRefreshKey(prev => prev + 1);
+        }} />
+      )}
     </div>
   )
 }
@@ -316,7 +414,7 @@ function APDetail({ ap, onChange }: { ap: any, onChange: (updated: any) => void 
             value={ap.reference_type}
             onChange={e => onChange({ ...ap, reference_type: e.target.value })}
           >
-            {['PO', 'CI', 'Container', 'BL', 'GR', 'Lot', 'Container Item'].map(t => (
+            {['PO', 'CI', 'Container', 'BL', 'GR', 'Lot', 'Container Item', 'AP Target Group'].map(t => (
               <option key={t} value={t}>{t}</option>
             ))}
           </select>

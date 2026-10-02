@@ -211,6 +211,27 @@ func migrateProcurement(db *sql.DB) error {
 			FOREIGN KEY (Lot_ID) REFERENCES Inventory_Lot(Lot_ID),
 			FOREIGN KEY (AP_ID) REFERENCES Account_Payable(AP_ID)
 		)`,
+		`CREATE TABLE IF NOT EXISTS AP_Target_Group (
+			Group_ID INTEGER PRIMARY KEY AUTOINCREMENT,
+			Group_No TEXT UNIQUE NOT NULL,
+			Group_Name TEXT,
+			Reference_Type TEXT NOT NULL,
+			Status TEXT CHECK (Status IN ('Draft', 'Open', 'Closed')) DEFAULT 'Draft',
+			Remark TEXT,
+			Created_By TEXT,
+			Created_At DATETIME DEFAULT CURRENT_TIMESTAMP,
+			Updated_By TEXT,
+			Updated_At DATETIME DEFAULT CURRENT_TIMESTAMP,
+			UUID TEXT UNIQUE NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS AP_Target_Group_Item (
+			Group_Item_ID INTEGER PRIMARY KEY AUTOINCREMENT,
+			Group_ID INTEGER NOT NULL,
+			Reference_UUID TEXT NOT NULL,
+			Allocated_Amount REAL,
+			Remark TEXT,
+			FOREIGN KEY (Group_ID) REFERENCES AP_Target_Group(Group_ID) ON DELETE CASCADE
+		)`,
 		`CREATE TRIGGER IF NOT EXISTS trg_sync_po_status AFTER UPDATE OF Status ON PO_Item
 		BEGIN
 			-- Close PO if all items are Shipped or Cancelled
@@ -355,6 +376,35 @@ func migrateProcurement(db *sql.DB) error {
 		if _, err := db.Exec(q); err != nil {
 			return fmt.Errorf("migration error: %w", err)
 		}
+	}
+
+	// Schema migrations for AP_Target_Group (tolerate errors if already applied)
+	_ = migrateAPTargetGroupSchema(db)
+
+	return nil
+}
+
+func migrateAPTargetGroupSchema(db *sql.DB) error {
+	// Add Reference_Type to AP_Target_Group if missing
+	var hasRefType int
+	err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('AP_Target_Group') WHERE name = 'Reference_Type'`).Scan(&hasRefType)
+	if err == nil && hasRefType == 0 {
+		_, _ = db.Exec(`ALTER TABLE AP_Target_Group ADD COLUMN Reference_Type TEXT NOT NULL DEFAULT 'PO'`)
+	}
+
+	// Drop legacy columns from AP_Target_Group if they still exist (Vendor_ID, Currency, Total_Amount)
+	for _, col := range []string{"Vendor_ID", "Currency", "Total_Amount"} {
+		var has int
+		err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('AP_Target_Group') WHERE name = ?`, col).Scan(&has)
+		if err == nil && has == 1 {
+			_, _ = db.Exec(fmt.Sprintf(`ALTER TABLE AP_Target_Group DROP COLUMN %s`, col))
+		}
+	}
+
+	// Drop Reference_Type from AP_Target_Group_Item if exists
+	err = db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('AP_Target_Group_Item') WHERE name = 'Reference_Type'`).Scan(&hasRefType)
+	if err == nil && hasRefType == 1 {
+		_, _ = db.Exec(`ALTER TABLE AP_Target_Group_Item DROP COLUMN Reference_Type`)
 	}
 	return nil
 }
@@ -922,6 +972,50 @@ func (r *SQLiteProcurementRepository) GetContainersByBLID(blID int) ([]models.Co
 	return list, nil
 }
 
+// GetUnbookedPOItems 미예약 PO 항목 조회 (Open 상태 PO의 남은 수량)
+func (r *SQLiteProcurementRepository) GetUnbookedPOItems() ([]models.BookingTemplateRow, error) {
+	query := `
+		SELECT 
+			pi.PO_Item_ID,
+			p.PO_No,
+			im.SKU_Code,
+			im.Name,
+			vm.Name,
+			pi.PO_Qty,
+			pi.PO_Qty - IFNULL(SUM(ci.Load_Qty), 0) as Remaining_Qty,
+			pi.Unit_Price,
+			p.Currency
+		FROM PO_Item pi
+		JOIN Purchase_Order p ON pi.PO_ID = p.PO_ID
+		JOIN Item_Master im ON pi.Item_ID = im.Item_ID
+		JOIN Vendor_Master vm ON p.Vendor_ID = vm.Vendor_ID
+		LEFT JOIN Container_Item ci ON pi.PO_Item_ID = ci.PO_Item_ID
+		WHERE p.Status = 'Open'
+		GROUP BY pi.PO_Item_ID, p.PO_No, im.SKU_Code, im.Name, vm.Name, pi.PO_Qty, pi.Unit_Price, p.Currency
+		HAVING Remaining_Qty > 0
+		ORDER BY p.PO_No, pi.PO_Item_ID
+	`
+	rows, err := r.db.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	list := []models.BookingTemplateRow{}
+	for rows.Next() {
+		var row models.BookingTemplateRow
+		err := rows.Scan(&row.POItemID, &row.PONo, &row.SKUCode, &row.ItemName, &row.VendorName,
+			&row.OrderedQty, &row.RemainingQty, &row.UnitPrice, &row.Currency)
+		if err != nil {
+			return nil, err
+		}
+		// 기본값: Load Qty = Remaining Qty
+		row.LoadQty = row.RemainingQty
+		list = append(list, row)
+	}
+	return list, nil
+}
+
 func (r *SQLiteProcurementRepository) GetBookings() ([]models.BookingView, error) {
 	query := `
 		SELECT 
@@ -1009,4 +1103,436 @@ func (r *SQLiteProcurementRepository) GetBookings() ([]models.BookingView, error
 		list = append(list, b)
 	}
 	return list, nil
+}
+
+// AP Target Group
+func (r *SQLiteProcurementRepository) GetAPTargetGroups() ([]models.AP_TargetGroup, error) {
+	rows, err := r.db.Query(`
+		SELECT Group_ID, Group_No, IFNULL(Group_Name, ''), IFNULL(Reference_Type, ''), IFNULL(Status, 'Draft'), IFNULL(Remark, ''),
+		       IFNULL(Created_By, ''), Created_At, IFNULL(Updated_By, ''), Updated_At, UUID
+		FROM AP_Target_Group
+		ORDER BY Created_At DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	list := []models.AP_TargetGroup{}
+	for rows.Next() {
+		var g models.AP_TargetGroup
+		err := rows.Scan(&g.ID, &g.GroupNo, &g.GroupName, &g.ReferenceType, &g.Status, &g.Remark,
+			&g.CreatedBy, &g.CreatedAt, &g.UpdatedBy, &g.UpdatedAt, &g.UUID)
+		if err != nil {
+			return nil, err
+		}
+		list = append(list, g)
+	}
+	return list, nil
+}
+
+func (r *SQLiteProcurementRepository) GetAPTargetGroupByID(id int) (*models.AP_TargetGroup, error) {
+	var g models.AP_TargetGroup
+	err := r.db.QueryRow(`
+		SELECT Group_ID, Group_No, IFNULL(Group_Name, ''), IFNULL(Reference_Type, ''), IFNULL(Status, 'Draft'), IFNULL(Remark, ''),
+		       IFNULL(Created_By, ''), Created_At, IFNULL(Updated_By, ''), Updated_At, UUID
+		FROM AP_Target_Group WHERE Group_ID = ?`, id).
+		Scan(&g.ID, &g.GroupNo, &g.GroupName, &g.ReferenceType, &g.Status, &g.Remark,
+			&g.CreatedBy, &g.CreatedAt, &g.UpdatedBy, &g.UpdatedAt, &g.UUID)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	items, _ := r.GetAPTargetGroupItems(id)
+	g.Items = items
+	return &g, nil
+}
+
+func (r *SQLiteProcurementRepository) GetAPTargetGroupItems(groupID int) ([]models.AP_TargetGroupItem, error) {
+	rows, err := r.db.Query(`
+		SELECT Group_Item_ID, Group_ID, IFNULL(Reference_UUID, ''), IFNULL(Allocated_Amount, 0), IFNULL(Remark, '')
+		FROM AP_Target_Group_Item WHERE Group_ID = ?`, groupID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	list := []models.AP_TargetGroupItem{}
+	for rows.Next() {
+		var i models.AP_TargetGroupItem
+		err := rows.Scan(&i.ID, &i.GroupID, &i.ReferenceUUID, &i.AllocatedAmount, &i.Remark)
+		if err != nil {
+			return nil, err
+		}
+		list = append(list, i)
+	}
+	return list, nil
+}
+
+func (r *SQLiteProcurementRepository) SaveAPTargetGroup(g *models.AP_TargetGroup) error {
+	if g.ID == 0 {
+		res, err := r.db.Exec(`
+			INSERT INTO AP_Target_Group (Group_No, Group_Name, Reference_Type, Status, Remark, Created_By, UUID)
+			VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			g.GroupNo, g.GroupName, g.ReferenceType, g.Status, g.Remark, g.CreatedBy, g.UUID)
+		if err != nil {
+			return err
+		}
+		id, _ := res.LastInsertId()
+		g.ID = int(id)
+		return nil
+	}
+	_, err := r.db.Exec(`
+		UPDATE AP_Target_Group SET Group_No=?, Group_Name=?, Reference_Type=?, Status=?, Remark=?, Updated_By=?, Updated_At=CURRENT_TIMESTAMP
+		WHERE Group_ID=?`,
+		g.GroupNo, g.GroupName, g.ReferenceType, g.Status, g.Remark, g.UpdatedBy, g.ID)
+	return err
+}
+
+func (r *SQLiteProcurementRepository) SaveAPTargetGroupItem(item *models.AP_TargetGroupItem) error {
+	if item.ID == 0 {
+		res, err := r.db.Exec(`
+			INSERT INTO AP_Target_Group_Item (Group_ID, Reference_UUID, Allocated_Amount, Remark) 
+			VALUES (?, ?, ?, ?)`,
+			item.GroupID, item.ReferenceUUID, item.AllocatedAmount, item.Remark)
+		if err != nil {
+			return err
+		}
+		id, _ := res.LastInsertId()
+		item.ID = int(id)
+		return nil
+	}
+	_, err := r.db.Exec(`
+		UPDATE AP_Target_Group_Item SET Group_ID=?, Reference_UUID=?, Allocated_Amount=?, Remark=? 
+		WHERE Group_Item_ID=?`,
+		item.GroupID, item.ReferenceUUID, item.AllocatedAmount, item.Remark, item.ID)
+	return err
+}
+
+func (r *SQLiteProcurementRepository) DeleteAPTargetGroupItem(id int) error {
+	_, err := r.db.Exec("DELETE FROM AP_Target_Group_Item WHERE Group_Item_ID = ?", id)
+	return err
+}
+
+func (r *SQLiteProcurementRepository) GetAllReferenceTargets() ([]models.APTargetGroupReference, error) {
+	var list []models.APTargetGroupReference
+
+	// PO
+	rows, err := r.db.Query("SELECT PO_ID, PO_No, Vendor_ID, Total_Amount, Currency, UUID FROM Purchase_Order")
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var id int
+			var no, currency, uuid string
+			var vendorID int
+			var amount float64
+			if err := rows.Scan(&id, &no, &vendorID, &amount, &currency, &uuid); err == nil {
+				list = append(list, models.APTargetGroupReference{
+					ReferenceUUID: uuid,
+					ReferenceType: "PO",
+					ReferenceNo:   no,
+					Description:   fmt.Sprintf("Purchase Order #%d", id),
+					Amount:        amount,
+					Currency:      currency,
+				})
+			}
+		}
+	}
+
+	// CI
+	rows, err = r.db.Query("SELECT CI_ID, CI_No, Vendor_ID, Total_Amount, Currency, UUID FROM Commercial_Invoice")
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var id int
+			var no, currency, uuid string
+			var vendorID int
+			var amount float64
+			if err := rows.Scan(&id, &no, &vendorID, &amount, &currency, &uuid); err == nil {
+				list = append(list, models.APTargetGroupReference{
+					ReferenceUUID: uuid,
+					ReferenceType: "CI",
+					ReferenceNo:   no,
+					Description:   fmt.Sprintf("Commercial Invoice #%d", id),
+					Amount:        amount,
+					Currency:      currency,
+				})
+			}
+		}
+	}
+
+	// BL
+	rows, err = r.db.Query("SELECT BL_ID, BL_No, UUID FROM BL")
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var id int
+			var no, uuid string
+			if err := rows.Scan(&id, &no, &uuid); err == nil {
+				list = append(list, models.APTargetGroupReference{
+					ReferenceUUID: uuid,
+					ReferenceType: "BL",
+					ReferenceNo:   no,
+					Description:   fmt.Sprintf("B/L #%d", id),
+				})
+			}
+		}
+	}
+
+	// Container
+	rows, err = r.db.Query("SELECT Container_ID, Container_No, UUID FROM Container")
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var id int
+			var no, uuid string
+			if err := rows.Scan(&id, &no, &uuid); err == nil {
+				list = append(list, models.APTargetGroupReference{
+					ReferenceUUID: uuid,
+					ReferenceType: "Container",
+					ReferenceNo:   no,
+					Description:   fmt.Sprintf("Container #%d", id),
+				})
+			}
+		}
+	}
+
+	// Container_Item
+	rows, err = r.db.Query("SELECT Container_Item_ID, Load_Qty, Unit_Price, Currency, UUID FROM Container_Item")
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var id int
+			var loadQty, unitPrice float64
+			var currency, uuid string
+			if err := rows.Scan(&id, &loadQty, &unitPrice, &currency, &uuid); err == nil {
+				list = append(list, models.APTargetGroupReference{
+					ReferenceUUID: uuid,
+					ReferenceType: "Container Item",
+					ReferenceNo:   fmt.Sprintf("CI-%d", id),
+					Description:   fmt.Sprintf("Container Item #%d", id),
+					Amount:        loadQty * unitPrice,
+					Currency:      currency,
+				})
+			}
+		}
+	}
+
+	// GR
+	rows, err = r.db.Query("SELECT GR_ID, Receive_Date, Remark, UUID FROM Goods_Receipt")
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var id int
+			var date, remark, uuid string
+			if err := rows.Scan(&id, &date, &remark, &uuid); err == nil {
+				list = append(list, models.APTargetGroupReference{
+					ReferenceUUID: uuid,
+					ReferenceType: "GR",
+					ReferenceNo:   fmt.Sprintf("GR-%d", id),
+					Description:   fmt.Sprintf("GR #%d (%s)", id, date),
+				})
+			}
+		}
+	}
+
+	// Lot
+	rows, err = r.db.Query("SELECT Lot_ID, Lot_No, Qty, UUID FROM Inventory_Lot")
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var id int
+			var no, uuid string
+			var qty float64
+			if err := rows.Scan(&id, &no, &qty, &uuid); err == nil {
+				list = append(list, models.APTargetGroupReference{
+					ReferenceUUID: uuid,
+					ReferenceType: "Lot",
+					ReferenceNo:   no,
+					Description:   fmt.Sprintf("Lot #%d", id),
+				})
+			}
+		}
+	}
+
+	return list, nil
+}
+
+// CheckReferences 삭제 대상 레코드를 참조하는 다른 테이블 확인
+func (r *SQLiteProcurementRepository) CheckReferences(tableName string, id int) (*models.DeleteCheckResult, error) {
+	result := &models.DeleteCheckResult{CanDelete: true, References: []models.ReferenceInfo{}}
+
+	type refCheck struct {
+		table  string
+		column string
+		label  string
+		query  string
+	}
+
+	var checks []refCheck
+	var groupUUID string
+
+	switch tableName {
+	case "Item_Master":
+		checks = []refCheck{
+			{table: "PO_Item", column: "Item_ID", label: "PO Items",
+				query: "SELECT PO_Item_ID, PO_ID, PO_Qty FROM PO_Item WHERE Item_ID = ?"},
+		}
+	case "Vendor_Master":
+		checks = []refCheck{
+			{table: "Purchase_Order", column: "Vendor_ID", label: "Purchase Orders",
+				query: "SELECT PO_ID, PO_No, Status FROM Purchase_Order WHERE Vendor_ID = ?"},
+			{table: "Commercial_Invoice", column: "Vendor_ID", label: "Commercial Invoices",
+				query: "SELECT CI_ID, CI_No, Status FROM Commercial_Invoice WHERE Vendor_ID = ?"},
+			{table: "Account_Payable", column: "Vendor_ID", label: "Account Payables",
+				query: "SELECT AP_ID, AP_No, Status FROM Account_Payable WHERE Vendor_ID = ?"},
+		}
+	case "Purchase_Order":
+		checks = []refCheck{
+			{table: "PO_Item", column: "PO_ID", label: "PO Items",
+				query: "SELECT PO_Item_ID, Item_ID, PO_Qty FROM PO_Item WHERE PO_ID = ?"},
+		}
+	case "PO_Item":
+		checks = []refCheck{
+			{table: "Container_Item", column: "PO_Item_ID", label: "Container Items (Bookings)",
+				query: "SELECT Container_Item_ID, Container_ID, Load_Qty FROM Container_Item WHERE PO_Item_ID = ?"},
+		}
+	case "Commercial_Invoice":
+		checks = []refCheck{
+			{table: "Container_Item", column: "CI_ID", label: "Container Items (Bookings)",
+				query: "SELECT Container_Item_ID, PO_Item_ID, Load_Qty FROM Container_Item WHERE CI_ID = ?"},
+		}
+	case "Container":
+		checks = []refCheck{
+			{table: "Container_Item", column: "Container_ID", label: "Container Items (Bookings)",
+				query: "SELECT Container_Item_ID, PO_Item_ID, Load_Qty FROM Container_Item WHERE Container_ID = ?"},
+		}
+	case "BL":
+		checks = []refCheck{
+			{table: "Container_Item", column: "BL_ID", label: "Container Items (Bookings)",
+				query: "SELECT Container_Item_ID, PO_Item_ID, Load_Qty FROM Container_Item WHERE BL_ID = ?"},
+		}
+	case "Container_Item":
+		checks = []refCheck{
+			{table: "Inventory_Lot", column: "Container_Item_ID", label: "Inventory Lots",
+				query: "SELECT Lot_ID, Lot_No, Qty FROM Inventory_Lot WHERE Container_Item_ID = ?"},
+		}
+	case "Goods_Receipt":
+		checks = []refCheck{
+			{table: "Inventory_Lot", column: "GR_ID", label: "Inventory Lots",
+				query: "SELECT Lot_ID, Lot_No, Qty FROM Inventory_Lot WHERE GR_ID = ?"},
+		}
+	case "Inventory_Lot":
+		checks = []refCheck{
+			{table: "Cost_Allocation_Item", column: "Lot_ID", label: "Cost Allocation Items",
+				query: "SELECT Cost_Allocation_Item_ID, Cost_Allocation_ID, Allocated_Amount FROM Cost_Allocation_Item WHERE Lot_ID = ?"},
+		}
+	case "Account_Payable":
+		checks = []refCheck{
+			{table: "Cost_Allocation_Item", column: "AP_ID", label: "Cost Allocation Items",
+				query: "SELECT Cost_Allocation_Item_ID, Cost_Allocation_ID, Allocated_Amount FROM Cost_Allocation_Item WHERE AP_ID = ?"},
+		}
+	case "Cost_Allocation":
+		checks = []refCheck{
+			{table: "Cost_Allocation_Item", column: "Cost_Allocation_ID", label: "Cost Allocation Items",
+				query: "SELECT Cost_Allocation_Item_ID, Lot_ID, Allocated_Amount FROM Cost_Allocation_Item WHERE Cost_Allocation_ID = ?"},
+		}
+	case "AP_Target_Group":
+		if err := r.db.QueryRow("SELECT UUID FROM AP_Target_Group WHERE Group_ID = ?", id).Scan(&groupUUID); err != nil {
+			return result, nil
+		}
+		checks = []refCheck{
+			{table: "Account_Payable", column: "Reference_UUID", label: "Account Payables",
+				query: "SELECT AP_ID, AP_No, Status FROM Account_Payable WHERE Reference_UUID = ? AND Reference_Type = 'AP_Target_Group'"},
+		}
+	default:
+		return result, nil
+	}
+
+	for _, check := range checks {
+		param := interface{}(id)
+		if tableName == "AP_Target_Group" {
+			param = groupUUID
+		}
+		rows, err := r.db.Query(check.query, param)
+		if err != nil {
+			continue
+		}
+
+		cols, _ := rows.Columns()
+		records := []map[string]interface{}{}
+
+		for rows.Next() {
+			values := make([]interface{}, len(cols))
+			ptrs := make([]interface{}, len(cols))
+			for i := range values {
+				ptrs[i] = &values[i]
+			}
+			if err := rows.Scan(ptrs...); err != nil {
+				continue
+			}
+			record := make(map[string]interface{})
+			for i, col := range cols {
+				val := values[i]
+				if b, ok := val.([]byte); ok {
+					record[col] = string(b)
+				} else {
+					record[col] = val
+				}
+			}
+			records = append(records, record)
+		}
+		rows.Close()
+
+		if len(records) > 0 {
+			result.CanDelete = false
+			result.References = append(result.References, models.ReferenceInfo{
+				TableName: check.label,
+				Count:     len(records),
+				Records:   records,
+			})
+			result.TotalRefs += len(records)
+		}
+	}
+
+	return result, nil
+}
+
+// DeleteRecord 지정된 테이블의 레코드 삭제
+func (r *SQLiteProcurementRepository) DeleteRecord(tableName string, id int) error {
+	var query string
+	switch tableName {
+	case "Item_Master":
+		query = "DELETE FROM Item_Master WHERE Item_ID = ?"
+	case "Vendor_Master":
+		query = "DELETE FROM Vendor_Master WHERE Vendor_ID = ?"
+	case "Purchase_Order":
+		query = "DELETE FROM Purchase_Order WHERE PO_ID = ?"
+	case "PO_Item":
+		query = "DELETE FROM PO_Item WHERE PO_Item_ID = ?"
+	case "Commercial_Invoice":
+		query = "DELETE FROM Commercial_Invoice WHERE CI_ID = ?"
+	case "Container":
+		query = "DELETE FROM Container WHERE Container_ID = ?"
+	case "BL":
+		query = "DELETE FROM BL WHERE BL_ID = ?"
+	case "Container_Item":
+		query = "DELETE FROM Container_Item WHERE Container_Item_ID = ?"
+	case "Goods_Receipt":
+		query = "DELETE FROM Goods_Receipt WHERE GR_ID = ?"
+	case "Inventory_Lot":
+		query = "DELETE FROM Inventory_Lot WHERE Lot_ID = ?"
+	case "Account_Payable":
+		query = "DELETE FROM Account_Payable WHERE AP_ID = ?"
+	case "Cost_Allocation":
+		query = "DELETE FROM Cost_Allocation WHERE Cost_Allocation_ID = ?"
+	case "AP_Target_Group":
+		query = "DELETE FROM AP_Target_Group WHERE Group_ID = ?"
+	default:
+		return fmt.Errorf("unsupported table: %s", tableName)
+	}
+
+	_, err := r.db.Exec(query, id)
+	return err
 }

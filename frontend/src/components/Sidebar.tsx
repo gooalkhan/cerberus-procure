@@ -17,6 +17,7 @@ const Sidebar: React.FC<SidebarProps> = ({ activeMenu, setActiveMenu }) => {
     { id: 'containers', label: 'Container Master', icon: '📥', isSub: true },
     { id: 'invoices', label: 'Commercial Invoices', icon: '🧾' },
     { id: 'aps', label: 'Account Payables', icon: '💰' },
+    { id: 'ap_target_groups', label: 'AP Target Groups', icon: '🎯' },
     { id: 'inventory', label: 'Landed Goods', icon: '🏭' },
     { id: 'allocations', label: 'Cost Allocations', icon: '⚖️' },
   ];

@@ -16,7 +16,15 @@
 | **Purchase_Order** | PO_ID (PK), PO_Date (NN), PO_No (UK, NN), Vendor_ID (FK, NN), Currency (NN), Total_Amount (NN), Status (Default 'Open'), Remark, Created_By, Created_At (Default), Updated_By, Updated_At (Default), UUID (UK, NN) | 수입 발주 기본 정보. Status: Open, Closed |
 | **PO_Item** | PO_Item_ID (PK), PO_ID (FK, NN), Item_ID (FK, NN), PO_Qty (>0), Unit_Price (NN), Status(Default 'Not Shipped'), Remark, Created_By, Created_At (Default), Updated_By, Updated_At (Default) | 발주 품목 정보. Status: Shipped, Partially Shipped, Not Shipped, Cancelled. **Trigger**: 모든 품목이 Shipped/Cancelled이면 PO를 Closed로, 하나라도 미완료면 Open으로 자동 변경. |
 | **Commercial_Invoice** | CI_ID (PK), CI_No (UK, NN), Invoice_Date (NN), Vendor_ID (FK, NN), Currency (NN), Total_Amount (NN), Status, Remark, Created_By, Created_At (Default), Updated_By, Updated_At (Default), UUID (UK, NN)| 상업 송장 기본 정보. Status: Draft, Open, Closed |
-| **Account_Payable** | AP_ID (PK), Vendor_ID (FK, NN), AP_No (UK, NN), Amount (NN), Currency (NN), Local_Amount, Allocation_Type (Check), Reference_UUID, Reference_Type, Due_Date, Date_of_Payment, Allocation_Status, Remark, Created_By, Created_At (Default), Updated_By, Updated_At (Default), UUID (UK, NN) | AP 통합 관리. Status: Paid, Unpaid \|Allocation_Type: Weight, Volume, Quantity, Value, Unit|
+| **Account_Payable** | AP_ID (PK), Vendor_ID (FK, NN), AP_No (UK, NN), Amount (NN), Currency (NN), Local_Amount, Allocation_Type (Check), Reference_UUID, Reference_Type, Due_Date, Date_of_Payment, Allocation_Status, Remark, Created_By, Created_At (Default), Updated_By, Updated_At (Default), UUID (UK, NN) | AP 통합 관리. Status: Paid, Unpaid \|Allocation_Type: Weight, Volume, Quantity, Value, Unit. Reference_Type에 `AP_Target_Group` 추가 지원.|
+
+### 2.1 AP 타겟 그룹 (AP Target Group)
+복수의 원천 문서(PO, CI, BL, Container 등)를 하나의 논리적 AP 타겟으로 묶어 1회 청구형 AP를 발행할 수 있습니다.
+
+| Table | Columns | Description |
+| :--- | :--- | :--- |
+| **AP_Target_Group** | Group_ID (PK), Group_No (UK, NN), Group_Name, Reference_Type (NN), Status, Remark, Created_By, Created_At (Default), Updated_By, Updated_At (Default), UUID (UK, NN) | AP 타겟 그룹 헤더. 하나의 UUID로 동일 종류의 여러 문서를 대표. 금액/통화/벤더는 그룹에 속한 기저 문서에서 집계됨. Reference_Type: PO, CI, BL, Container, Container_Item, GR, Lot. Status: Draft, Open, Closed |
+| **AP_Target_Group_Item** | Group_Item_ID (PK), Group_ID (FK, NN), Reference_UUID (NN), Allocated_Amount, Remark | 그룹에 포함된 개별 참조. 그룹의 Reference_Type과 동일한 종류의 문서만 포함 가능. |
 
 ## 3. 물류 및 선적 관리 (Logistics & Shipping)
 N:N:N 아이템 매핑을 통해 복잡한 혼적 상황을 해결합니다.

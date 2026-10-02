@@ -2,7 +2,9 @@ import {
   ItemMaster, VendorMaster, PurchaseOrder, POItem, 
   CommercialInvoice, CIAggregatedItem, AccountPayable, Container, 
   ContainerItem, BL, GoodsReceipt, InventoryLot, 
-  CostAllocation, CostAllocationItem, BookingView 
+  CostAllocation, CostAllocationItem, BookingView,
+  BookingTemplateRow, BulkImportRow,
+  AP_TargetGroup, AP_TargetGroupItem, APTargetGroupReference
 } from './models';
 
 declare global {
@@ -38,6 +40,15 @@ declare global {
       getCostAllocations: () => Promise<string>;
       saveCostAllocation: (json: string) => Promise<void>;
       getBookings: () => Promise<string>;
+      getBookingTemplate: () => Promise<string>;
+      bulkImportBookings: (json: string) => Promise<string>;
+      checkReferences: (table: string, id: number) => Promise<string>;
+      deleteRecord: (table: string, id: number) => Promise<void>;
+      getAPTargetGroups: () => Promise<string>;
+      saveAPTargetGroup: (json: string) => Promise<string>;
+      saveAPTargetGroupItem: (json: string) => Promise<string>;
+      deleteAPTargetGroupItem: (id: number) => Promise<void>;
+      getAPTargetGroupReferences: () => Promise<string>;
     };
   }
 }
@@ -233,5 +244,54 @@ export const procureApi = {
   getBookings: async (): Promise<BookingView[]> => {
     if (isWasm()) return JSON.parse(await window.procureApi.getBookings());
     return request<BookingView[]>('/bookings');
+  },
+
+  // Booking Template
+  getBookingTemplate: async (): Promise<BookingTemplateRow[]> => {
+    if (isWasm()) return JSON.parse(await window.procureApi.getBookingTemplate());
+    return request<BookingTemplateRow[]>('/bookings/template');
+  },
+
+  // Bulk Import
+  bulkImportBookings: async (rows: BulkImportRow[]): Promise<{ created: number; total: number }> => {
+    if (isWasm()) return JSON.parse(await window.procureApi.bulkImportBookings(JSON.stringify(rows)));
+    return request<{ created: number; total: number }>('/bookings/bulk-import', 'POST', rows);
+  },
+
+  // References & Delete
+  checkReferences: async (table: string, id: number): Promise<{ can_delete: boolean; references: any[]; total_refs: number }> => {
+    if (isWasm()) return JSON.parse(await window.procureApi.checkReferences(table, id));
+    return request(`/references?table=${encodeURIComponent(table)}&id=${id}`);
+  },
+
+  deleteRecord: async (table: string, id: number): Promise<void> => {
+    if (isWasm()) return window.procureApi.deleteRecord(table, id);
+    return request(`/delete?table=${encodeURIComponent(table)}&id=${id}`, 'DELETE');
+  },
+
+  // AP Target Group
+  getAPTargetGroups: async (): Promise<AP_TargetGroup[]> => {
+    if (isWasm()) return JSON.parse(await window.procureApi.getAPTargetGroups());
+    return request<AP_TargetGroup[]>('/ap-target-groups');
+  },
+
+  saveAPTargetGroup: async (g: AP_TargetGroup): Promise<AP_TargetGroup> => {
+    if (isWasm()) return JSON.parse(await window.procureApi.saveAPTargetGroup(JSON.stringify(g)));
+    return request<AP_TargetGroup>('/ap-target-groups', 'POST', g);
+  },
+
+  saveAPTargetGroupItem: async (item: AP_TargetGroupItem): Promise<AP_TargetGroupItem> => {
+    if (isWasm()) return JSON.parse(await window.procureApi.saveAPTargetGroupItem(JSON.stringify(item)));
+    return request<AP_TargetGroupItem>('/ap-target-groups/items', 'POST', item);
+  },
+
+  deleteAPTargetGroupItem: async (id: number): Promise<void> => {
+    if (isWasm()) return window.procureApi.deleteAPTargetGroupItem(id);
+    return request(`/ap-target-groups/items?id=${id}`, 'DELETE');
+  },
+
+  getAPTargetGroupReferences: async (): Promise<APTargetGroupReference[]> => {
+    if (isWasm()) return JSON.parse(await window.procureApi.getAPTargetGroupReferences());
+    return request<APTargetGroupReference[]>('/ap-target-groups/references');
   },
 };

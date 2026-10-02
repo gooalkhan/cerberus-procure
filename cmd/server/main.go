@@ -4,7 +4,9 @@ import (
 	 "cerberus-procure/internal/logic"
 	 "cerberus-procure/internal/models"
 	 "cerberus-procure/internal/repository/sqlite"
+	"crypto/rand"
 	"embed"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -17,8 +19,46 @@ import (
 	"time"
 )
 
-var sessions = make(map[string]int)
+type session struct {
+	userID  int
+	expires time.Time
+}
+
+var sessions = make(map[string]*session)
 var sessionsMu sync.RWMutex
+
+const sessionCookieName = "session_id"
+const sessionDuration = 24 * time.Hour
+
+func generateSessionID() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
+}
+
+func cleanupExpiredSessions() {
+	sessionsMu.Lock()
+	defer sessionsMu.Unlock()
+	now := time.Now()
+	for id, s := range sessions {
+		if now.After(s.expires) {
+			delete(sessions, id)
+		}
+	}
+}
+
+func sessionCookie(value string, maxAge int) *http.Cookie {
+	return &http.Cookie{
+		Name:     sessionCookieName,
+		Value:    value,
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   maxAge,
+	}
+}
 
 var apiLogger *log.Logger
 var serverLogger *log.Logger
@@ -67,40 +107,43 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create session
-	sessionId := fmt.Sprintf("%d_%d", user.ID, time.Now().UnixNano())
+	sessionId, err := generateSessionID()
+	if err != nil {
+		http.Error(w, "Failed to create session", http.StatusInternalServerError)
+		return
+	}
 	sessionsMu.Lock()
-	sessions[sessionId] = user.ID
+	sessions[sessionId] = &session{userID: user.ID, expires: time.Now().Add(sessionDuration)}
 	sessionsMu.Unlock()
 
-	http.SetCookie(w, &http.Cookie{
-		Name:     "session_id",
-		Value:    sessionId,
-		Path:     "/",
-		HttpOnly: true,
-		Expires:  time.Now().Add(24 * time.Hour),
-	})
+	http.SetCookie(w, sessionCookie(sessionId, int(sessionDuration.Seconds())))
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(user)
 }
 
-func meHandler(w http.ResponseWriter, r *http.Request) {
-	cookie, err := r.Cookie("session_id")
+func getSession(r *http.Request) *session {
+	cookie, err := r.Cookie(sessionCookieName)
 	if err != nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
+		return nil
 	}
-
 	sessionsMu.RLock()
-	userId, ok := sessions[cookie.Value]
-	sessionsMu.RUnlock()
+	defer sessionsMu.RUnlock()
+	s, ok := sessions[cookie.Value]
+	if !ok || time.Now().After(s.expires) {
+		return nil
+	}
+	return s
+}
 
-	if !ok {
+func meHandler(w http.ResponseWriter, r *http.Request) {
+	s := getSession(r)
+	if s == nil {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 
-	user, err := authUC.GetUserByID(userId)
+	user, err := authUC.GetUserByID(s.userID)
 	if err != nil || user == nil {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
@@ -108,6 +151,18 @@ func meHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(user)
+}
+
+func logoutHandler(w http.ResponseWriter, r *http.Request) {
+	cookie, err := r.Cookie(sessionCookieName)
+	if err == nil {
+		sessionsMu.Lock()
+		delete(sessions, cookie.Value)
+		sessionsMu.Unlock()
+	}
+
+	http.SetCookie(w, sessionCookie("", -1))
+	w.WriteHeader(http.StatusOK)
 }
 
 func getTodosHandler(w http.ResponseWriter, r *http.Request) {
@@ -238,17 +293,7 @@ func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			lrw.handlerName = targetHandlerName
 		}
 
-		cookie, err := r.Cookie("session_id")
-		if err != nil {
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
-			return
-		}
-
-		sessionsMu.RLock()
-		_, ok := sessions[cookie.Value]
-		sessionsMu.RUnlock()
-
-		if !ok {
+		if getSession(r) == nil {
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
@@ -550,6 +595,143 @@ func bookingsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func bookingTemplateHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method == http.MethodGet {
+		data, err := procureUC.GetBookingTemplateData()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(data)
+	}
+}
+
+func bookingBulkImportHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method == http.MethodPost {
+		var rows []models.BulkImportRow
+		if err := json.NewDecoder(r.Body).Decode(&rows); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		created, err := procureUC.BulkCreateContainerItems(rows)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"created": created,
+			"total":   len(rows),
+		})
+	}
+}
+
+func checkReferencesHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method == http.MethodGet {
+		tableName := r.URL.Query().Get("table")
+		idStr := r.URL.Query().Get("id")
+		var id int
+		fmt.Sscanf(idStr, "%d", &id)
+
+		result, err := procureUC.CheckReferences(tableName, id)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(result)
+	}
+}
+
+func deleteRecordHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method == http.MethodDelete {
+		tableName := r.URL.Query().Get("table")
+		idStr := r.URL.Query().Get("id")
+		var id int
+		fmt.Sscanf(idStr, "%d", &id)
+
+		if err := procureUC.DeleteRecord(tableName, id); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	}
+}
+
+func apTargetGroupsHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method == http.MethodGet {
+		list, err := procureUC.GetAPTargetGroups()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(list)
+	} else if r.Method == http.MethodPost {
+		var g models.AP_TargetGroup
+		if err := json.NewDecoder(r.Body).Decode(&g); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if err := procureUC.SaveAPTargetGroup(&g); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(g)
+	}
+}
+
+func apTargetGroupItemsHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method == http.MethodGet {
+		groupIDStr := r.URL.Query().Get("groupId")
+		var groupID int
+		fmt.Sscanf(groupIDStr, "%d", &groupID)
+		list, err := procureUC.GetAPTargetGroupByID(groupID)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(list)
+	} else if r.Method == http.MethodPost {
+		var item models.AP_TargetGroupItem
+		if err := json.NewDecoder(r.Body).Decode(&item); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if err := procureUC.SaveAPTargetGroupItem(&item); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(item)
+	} else if r.Method == http.MethodDelete {
+		idStr := r.URL.Query().Get("id")
+		var id int
+		fmt.Sscanf(idStr, "%d", &id)
+		if err := procureUC.DeleteAPTargetGroupItem(id); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}
+}
+
+func apTargetGroupReferencesHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method == http.MethodGet {
+		list, err := procureUC.GetAllReferenceTargets()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(list)
+	}
+}
+
 func todosHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	switch r.Method {
@@ -588,6 +770,7 @@ func main() {
 
 	// API 핸들러
 	mux.HandleFunc("/api/login", corsMiddleware(loginHandler))
+	mux.HandleFunc("/api/logout", corsMiddleware(logoutHandler))
 	mux.HandleFunc("/api/me", corsMiddleware(authMiddleware(meHandler)))
 	
 	mux.HandleFunc("/api/seed", corsMiddleware(authMiddleware(seedHandler)))
@@ -607,6 +790,13 @@ func main() {
 	mux.HandleFunc("/api/lots/gr", corsMiddleware(authMiddleware(lotsByGRHandler)))
 	mux.HandleFunc("/api/allocations", corsMiddleware(authMiddleware(allocationsHandler)))
 	mux.HandleFunc("/api/bookings", corsMiddleware(authMiddleware(bookingsHandler)))
+	mux.HandleFunc("/api/bookings/template", corsMiddleware(authMiddleware(bookingTemplateHandler)))
+	mux.HandleFunc("/api/bookings/bulk-import", corsMiddleware(authMiddleware(bookingBulkImportHandler)))
+	mux.HandleFunc("/api/references", corsMiddleware(authMiddleware(checkReferencesHandler)))
+	mux.HandleFunc("/api/delete", corsMiddleware(authMiddleware(deleteRecordHandler)))
+	mux.HandleFunc("/api/ap-target-groups", corsMiddleware(authMiddleware(apTargetGroupsHandler)))
+	mux.HandleFunc("/api/ap-target-groups/items", corsMiddleware(authMiddleware(apTargetGroupItemsHandler)))
+	mux.HandleFunc("/api/ap-target-groups/references", corsMiddleware(authMiddleware(apTargetGroupReferencesHandler)))
 	mux.HandleFunc("/api/todos", corsMiddleware(authMiddleware(todosHandler)))
 	mux.HandleFunc("/api/todos/toggle", corsMiddleware(authMiddleware(toggleTodoHandler)))
 	mux.HandleFunc("/api/todos/delete", corsMiddleware(authMiddleware(deleteTodoHandler)))
@@ -614,6 +804,14 @@ func main() {
 	// 프론트엔드 정적 파일 서빙
 	distFS, _ := fs.Sub(frontendAssets, "dist")
 	mux.Handle("/", http.FileServer(http.FS(distFS)))
+
+	// Clean up expired sessions every hour
+	go func() {
+		for {
+			time.Sleep(1 * time.Hour)
+			cleanupExpiredSessions()
+		}
+	}()
 
 	fmt.Println("Server starting on :8080...")
 	err = http.ListenAndServe(":8080", mux)
