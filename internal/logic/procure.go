@@ -240,8 +240,6 @@ func (uc *ProcurementUseCase) BulkCreateContainerItems(rows []models.BulkImportR
 			ContainerID: row.ContainerID,
 			BLID:        row.BLID,
 			LoadQty:     row.LoadQty,
-			UnitPrice:   row.UnitPrice,
-			Currency:    row.Currency,
 			UUID:        "",
 			Remark:      row.Remark,
 		}

@@ -263,7 +263,7 @@ const POItemDetail: React.FC<POItemDetailProps> = ({ po, onChange }) => {
           </tbody>
         </table>
 
-        <div className="form-grid" style={{ background: 'rgba(255,255,255,0.03)', padding: '1.5rem', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.1)' }}>
+        <div className="form-grid" style={{ background: '#f8fafc', padding: '1.5rem', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
           <div className="form-group">
             <label>AP No</label>
             <input type="text" value={newAp.ap_no} onChange={e => setNewAp({ ...newAp, ap_no: e.target.value })} placeholder="e.g. AP-PO-001" />

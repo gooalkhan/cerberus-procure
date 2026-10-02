@@ -24,7 +24,7 @@
 | Table | Columns | Description |
 | :--- | :--- | :--- |
 | **AP_Target_Group** | Group_ID (PK), Group_No (UK, NN), Group_Name, Reference_Type (NN), Status, Remark, Created_By, Created_At (Default), Updated_By, Updated_At (Default), UUID (UK, NN) | AP 타겟 그룹 헤더. 하나의 UUID로 동일 종류의 여러 문서를 대표. 금액/통화/벤더는 그룹에 속한 기저 문서에서 집계됨. Reference_Type: PO, CI, BL, Container, Container_Item, GR, Lot. Status: Draft, Open, Closed |
-| **AP_Target_Group_Item** | Group_Item_ID (PK), Group_ID (FK, NN), Reference_UUID (NN), Allocated_Amount, Remark | 그룹에 포함된 개별 참조. 그룹의 Reference_Type과 동일한 종류의 문서만 포함 가능. |
+| **AP_Target_Group_Item** | Group_Item_ID (PK), Group_ID (FK, NN), Reference_UUID (NN), Remark | 그룹에 포함된 개별 참조. 그룹의 Reference_Type과 동일한 종류의 문서만 포함 가능. |
 
 ## 3. 물류 및 선적 관리 (Logistics & Shipping)
 N:N:N 아이템 매핑을 통해 복잡한 혼적 상황을 해결합니다.
@@ -32,7 +32,7 @@ N:N:N 아이템 매핑을 통해 복잡한 혼적 상황을 해결합니다.
 | Table | Columns | Description |
 | :--- | :--- | :--- |
 | **Container** | Container_ID (PK), Container_No (NN), Remark, UUID (UK, NN), Total_CBM, Total_Net_Wgt, Total_Gross_Wgt, Status| 운송 단위 정보. Status: Loaded, Shipping, Arrived|
-| **Container_Item** | Container_Item_ID (PK), PO_Item_ID (FK, NN), Container_ID (FK), CI_ID (FK), BL_ID(FK), Unit_Price, Currency, Load_Qty, Gross_Weight, Net_Weight, Cbm, Temporary_ETA, UUID(UK, NN) Remark | 컨테이너 적재 품목 매핑. |
+| **Container_Item** | Container_Item_ID (PK), PO_Item_ID (FK, NN), Container_ID (FK), CI_ID (FK), BL_ID(FK), Load_Qty, Gross_Weight, Net_Weight, Cbm, Temporary_ETA, UUID(UK, NN) Remark | 컨테이너 적재 품목 매핑. 단가/통화는 PO_Item에서 파생. |
 | **BL** | BL_ID (PK), BL_No (UK, NN), ETD (NN), ETA (NN, >=ETD), POL, POD, Carrier, Vessel_Name, Status, Remark, UUID (UK, NN)| BL 정보. Status: Released, Partially Shipping, Shipping, Partially Arrived, Arrived|
 
 ## 4. 입고 및 로트 재고 (GR & Inventory Lot)

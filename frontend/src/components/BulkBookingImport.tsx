@@ -14,8 +14,6 @@ interface PreviewRow {
   item_name: string;
   load_qty: number;
   remaining_qty: number;
-  unit_price: number;
-  currency: string;
   container_no: string;
   container_id: number;
   bl_no: string;
@@ -59,8 +57,6 @@ export default function BulkBookingImport({ onComplete }: BulkBookingImportProps
         'Ordered Qty (Reference)',
         'Remaining Qty (Reference)',
         'Load Qty (Mandatory)',
-        'Unit Price',
-        'Currency',
         'Container No / ID (Optional)',
         'BL No / ID (Optional)',
         'Temporary ETA (YYYY-MM-DD)',
@@ -77,8 +73,6 @@ export default function BulkBookingImport({ onComplete }: BulkBookingImportProps
         row.ordered_qty,
         row.remaining_qty,
         row.load_qty,
-        row.unit_price,
-        row.currency,
         '',
         '',
         '',
@@ -97,8 +91,6 @@ export default function BulkBookingImport({ onComplete }: BulkBookingImportProps
         { wch: 14 }, // Ordered Qty
         { wch: 16 }, // Remaining Qty
         { wch: 12 }, // Load Qty
-        { wch: 12 }, // Unit Price
-        { wch: 10 }, // Currency
         { wch: 22 }, // Container No/ID
         { wch: 18 }, // BL No/ID
         { wch: 20 }, // Temporary ETA
@@ -158,12 +150,10 @@ export default function BulkBookingImport({ onComplete }: BulkBookingImportProps
 
         const poItemID = Number(row[0]);
         const loadQty = Number(row[7]);
-        const unitPrice = row[8] !== undefined ? Number(row[8]) : 0;
-        const currency = row[9] !== undefined ? String(row[9]) : '';
-        const containerInput = row[10] !== undefined ? String(row[10]).trim() : '';
-        const blInput = row[11] !== undefined ? String(row[11]).trim() : '';
-        const temporaryETA = row[12] !== undefined ? String(row[12]).trim() : '';
-        const remark = row[13] !== undefined ? String(row[13]).trim() : '';
+        const containerInput = row[8] !== undefined ? String(row[8]).trim() : '';
+        const blInput = row[9] !== undefined ? String(row[9]).trim() : '';
+        const temporaryETA = row[10] !== undefined ? String(row[10]).trim() : '';
+        const remark = row[11] !== undefined ? String(row[11]).trim() : '';
 
         const templateRow = templateMap.get(poItemID);
         const poNo = templateRow?.po_no || String(row[1] || '');
@@ -221,8 +211,6 @@ export default function BulkBookingImport({ onComplete }: BulkBookingImportProps
           item_name: itemName,
           load_qty: loadQty,
           remaining_qty: remainingQty,
-          unit_price: unitPrice || templateRow?.unit_price || 0,
-          currency: currency || templateRow?.currency || 'USD',
           container_no: containerNo,
           container_id: containerID,
           bl_no: blNo,
@@ -262,8 +250,6 @@ export default function BulkBookingImport({ onComplete }: BulkBookingImportProps
       const importRows: BulkImportRow[] = validRows.map(row => ({
         po_item_id: row.po_item_id,
         load_qty: row.load_qty,
-        unit_price: row.unit_price,
-        currency: row.currency,
         container_no: row.container_no,
         container_id: row.container_id,
         bl_no: row.bl_no,
@@ -295,17 +281,17 @@ export default function BulkBookingImport({ onComplete }: BulkBookingImportProps
   return (
     <div style={{
       position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-      background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+      background: 'rgba(15,23,42,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center',
       zIndex: 1000, backdropFilter: 'blur(4px)'
     }}>
       <div style={{
-        background: '#1e293b', borderRadius: '16px', padding: '2rem',
+        background: '#ffffff', borderRadius: '16px', padding: '2rem',
         width: '90%', maxWidth: '1100px', maxHeight: '90vh', overflow: 'auto',
-        border: '1px solid rgba(255,255,255,0.1)', boxShadow: '0 25px 50px rgba(0,0,0,0.5)'
+        border: '1px solid #0f172a', boxShadow: '0 25px 50px rgba(15,23,42,0.15)'
       }}>
         {/* 헤더 */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-          <h2 style={{ margin: 0, color: '#f1f5f9' }}>📥 Bulk Booking Import via Excel</h2>
+          <h2 style={{ margin: 0, color: '#0f172a' }}>📥 Bulk Booking Import via Excel</h2>
           <div style={{ display: 'flex', gap: '0.5rem' }}>
             {previewData && (
               <button className="secondary" onClick={handleReset}>Reset</button>
@@ -317,8 +303,8 @@ export default function BulkBookingImport({ onComplete }: BulkBookingImportProps
         {/* 에러 메시지 */}
         {error && (
           <div style={{
-            background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.3)',
-            borderRadius: '8px', padding: '0.75rem 1rem', marginBottom: '1rem', color: '#fca5a5'
+            background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)',
+            borderRadius: '8px', padding: '0.75rem 1rem', marginBottom: '1rem', color: '#b91c1c'
           }}>
             {error}
           </div>
@@ -327,8 +313,8 @@ export default function BulkBookingImport({ onComplete }: BulkBookingImportProps
         {/* 성공 메시지 */}
         {uploadResult && (
           <div style={{
-            background: 'rgba(16,185,129,0.15)', border: '1px solid rgba(16,185,129,0.3)',
-            borderRadius: '8px', padding: '1rem', marginBottom: '1rem', color: '#6ee7b7'
+            background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.25)',
+            borderRadius: '8px', padding: '1rem', marginBottom: '1rem', color: '#047857'
           }}>
             <strong>✅ Import Complete!</strong> {uploadResult.created} of {uploadResult.total} records created successfully.
             <div style={{ marginTop: '0.75rem' }}>
@@ -341,8 +327,8 @@ export default function BulkBookingImport({ onComplete }: BulkBookingImportProps
         {!previewData && !uploadResult && (
           <div>
             <div style={{ marginBottom: '1.5rem' }}>
-              <h3 style={{ color: '#e2e8f0', marginBottom: '0.5rem' }}>Step 1: Download Pre-filled Template</h3>
-              <p style={{ color: '#94a3b8', fontSize: '0.85rem', marginBottom: '1rem' }}>
+              <h3 style={{ color: '#0f172a', marginBottom: '0.5rem' }}>Step 1: Download Pre-filled Template</h3>
+              <p style={{ color: '#64748b', fontSize: '0.85rem', marginBottom: '1rem' }}>
                 Downloads an Excel template pre-filled with all unbooked items from Open Purchase Orders.
                 Each row shows the remaining quantity available for booking.
               </p>
@@ -357,10 +343,10 @@ export default function BulkBookingImport({ onComplete }: BulkBookingImportProps
             </div>
 
             <div style={{
-              borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '1.5rem'
+              borderTop: '1px solid #e2e8f0', paddingTop: '1.5rem'
             }}>
-              <h3 style={{ color: '#e2e8f0', marginBottom: '0.5rem' }}>Step 2: Upload Completed Excel</h3>
-              <p style={{ color: '#94a3b8', fontSize: '0.85rem', marginBottom: '1rem' }}>
+              <h3 style={{ color: '#0f172a', marginBottom: '0.5rem' }}>Step 2: Upload Completed Excel</h3>
+              <p style={{ color: '#64748b', fontSize: '0.85rem', marginBottom: '1rem' }}>
                 After filling in the Load Qty and optional fields (Container, BL, ETA, Remark),
                 upload the file for validation and preview.
               </p>
@@ -386,17 +372,17 @@ export default function BulkBookingImport({ onComplete }: BulkBookingImportProps
         {/* 단계 3: 미리보기 & 확인 */}
         {previewData && !uploadResult && (
           <div>
-            <h3 style={{ color: '#e2e8f0', marginBottom: '0.75rem' }}>Preview & Confirmation</h3>
+            <h3 style={{ color: '#0f172a', marginBottom: '0.75rem' }}>Preview & Confirmation</h3>
 
             {/* 요약 */}
             <div style={{
               display: 'flex', gap: '1rem', marginBottom: '1rem',
-              background: 'rgba(255,255,255,0.03)', padding: '0.75rem 1rem', borderRadius: '8px'
+              background: '#f8fafc', padding: '0.75rem 1rem', borderRadius: '8px'
             }}>
-              <span style={{ color: '#94a3b8' }}>Total: <strong style={{ color: '#f1f5f9' }}>{previewData.length}</strong></span>
-              <span style={{ color: '#6ee7b7' }}>Valid: <strong>{validCount}</strong></span>
-              <span style={{ color: '#fbbf24' }}>Warnings: <strong>{warnCount}</strong></span>
-              <span style={{ color: '#f87171' }}>Errors: <strong>{errorCount}</strong></span>
+              <span style={{ color: '#64748b' }}>Total: <strong style={{ color: '#0f172a' }}>{previewData.length}</strong></span>
+              <span style={{ color: '#047857' }}>Valid: <strong>{validCount}</strong></span>
+              <span style={{ color: '#b45309' }}>Warnings: <strong>{warnCount}</strong></span>
+              <span style={{ color: '#b91c1c' }}>Errors: <strong>{errorCount}</strong></span>
             </div>
 
             {/* 미리보기 테이블 */}
@@ -419,8 +405,8 @@ export default function BulkBookingImport({ onComplete }: BulkBookingImportProps
                 <tbody>
                   {previewData.map((row, idx) => (
                     <tr key={idx} style={{
-                      background: row.status === 'error' ? 'rgba(239,68,68,0.1)' :
-                        row.status === 'warn' ? 'rgba(251,191,36,0.1)' : 'transparent'
+                      background: row.status === 'error' ? 'rgba(239,68,68,0.06)' :
+                        row.status === 'warn' ? 'rgba(251,191,36,0.06)' : 'transparent'
                     }}>
                       <td style={{ textAlign: 'center', opacity: 0.6 }}>{row.row_number}</td>
                       <td>
@@ -435,7 +421,7 @@ export default function BulkBookingImport({ onComplete }: BulkBookingImportProps
                       <td style={{ textAlign: 'right' }}>{row.remaining_qty}</td>
                       <td>{row.container_id ? `ID:${row.container_id}` : row.container_no || '-'}</td>
                       <td>{row.bl_id ? `ID:${row.bl_id}` : row.bl_no || '-'}</td>
-                      <td style={{ fontSize: '0.8rem', color: row.status === 'error' ? '#f87171' : row.status === 'warn' ? '#fbbf24' : '#94a3b8' }}>
+                      <td style={{ fontSize: '0.8rem', color: row.status === 'error' ? '#b91c1c' : row.status === 'warn' ? '#b45309' : '#64748b' }}>
                         {row.message}
                       </td>
                     </tr>

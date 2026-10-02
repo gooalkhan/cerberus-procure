@@ -30,7 +30,7 @@ const Sidebar: React.FC<SidebarProps> = ({ activeMenu, setActiveMenu }) => {
       <ul className="menu-list">
         {menuItems.map((item: any, idx) => {
           if (item.isDivider) {
-            return <li key={`div-${idx}`} style={{ height: '1px', background: 'rgba(255,255,255,0.1)', margin: '1rem 0.5rem' }}></li>;
+            return <li key={`div-${idx}`} style={{ height: '1px', background: '#e2e8f0', margin: '1rem 0.5rem' }}></li>;
           }
           return (
             <li

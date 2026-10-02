@@ -113,15 +113,15 @@ func (r *MemoryProcurementRepository) seed() {
 
 	// Mock Container Items
 	ci1 := models.ContainerItem{
-		ID: 1, ContainerID: 1, BLID: 1, CIID: 1, POItemID: 1, 
-		LoadQty: 100, UnitPrice: 15.5, Currency: "USD",
+		ID: 1, ContainerID: 1, BLID: 1, CIID: 1, POItemID: 1,
+		LoadQty: 100,
 		GrossWeight: 1050, NetWeight: 1000, CBM: 5.0,
 		TemporaryETA: time.Now().AddDate(0, 0, 4),
 		UUID: "cont-item-uuid-1",
 	}
 	ci2 := models.ContainerItem{
-		ID: 2, ContainerID: 1, BLID: 1, CIID: 1, POItemID: 2, 
-		LoadQty: 50, UnitPrice: 8.0, Currency: "USD",
+		ID: 2, ContainerID: 1, BLID: 1, CIID: 1, POItemID: 2,
+		LoadQty: 50,
 		GrossWeight: 260, NetWeight: 250, CBM: 1.5,
 		TemporaryETA: time.Now().AddDate(0, 0, 6),
 		UUID: "cont-item-uuid-2",
@@ -360,10 +360,16 @@ func (r *MemoryProcurementRepository) GetCIAggregatedItems(ciID int) ([]models.C
 		for _, ci := range items {
 			if ci.CIID == ciID {
 				itemID := 0
+				var unitPrice float64
+				var currency string
 				for _, pItems := range r.poItems {
 					for _, pi := range pItems {
 						if pi.ID == ci.POItemID {
 							itemID = pi.ItemID
+							unitPrice = pi.UnitPrice
+							if po, ok := r.pos[pi.POID]; ok {
+								currency = po.Currency
+							}
 							break
 						}
 					}
@@ -376,14 +382,14 @@ func (r *MemoryProcurementRepository) GetCIAggregatedItems(ciID int) ([]models.C
 				}
 				if agg, ok := aggregates[itemID]; ok {
 					agg.TotalQty += ci.LoadQty
-					agg.Amount += ci.LoadQty * ci.UnitPrice
+					agg.Amount += ci.LoadQty * unitPrice
 				} else {
 					aggregates[itemID] = &models.CIAggregatedItem{
 						ItemID:   itemID,
 						ItemName: itemName,
 						TotalQty: ci.LoadQty,
-						Amount:   ci.LoadQty * ci.UnitPrice,
-						Currency: ci.Currency,
+						Amount:   ci.LoadQty * unitPrice,
+						Currency: currency,
 					}
 				}
 			}
@@ -783,8 +789,6 @@ func (r *MemoryProcurementRepository) GetUnbookedPOItems() ([]models.BookingTemp
 				OrderedQty:   pi.POQty,
 				RemainingQty: remainingQty,
 				LoadQty:      remainingQty,
-				UnitPrice:    pi.UnitPrice,
-				Currency:     po.Currency,
 			})
 		}
 	}
@@ -860,8 +864,6 @@ func (r *MemoryProcurementRepository) GetBookings() ([]models.BookingView, error
 				CIID:            ci.CIID,
 				CINo:            ciNo,
 				LoadQty:         ci.LoadQty,
-				UnitPrice:       ci.UnitPrice,
-				Currency:        ci.Currency,
 				GrossWeight:     ci.GrossWeight,
 				NetWeight:       ci.NetWeight,
 				CBM:             ci.CBM,

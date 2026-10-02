@@ -98,8 +98,6 @@ export interface ContainerItem {
   container_id: number;
   ci_id: number;
   bl_id: number;
-  unit_price: number;
-  currency: string;
   load_qty: number;
   gross_weight: number;
   net_weight: number;
@@ -182,8 +180,6 @@ export interface BookingView {
   ci_id: number;
   ci_no: string;
   load_qty: number;
-  unit_price: number;
-  currency: string;
   gross_weight: number;
   net_weight: number;
   cbm: number;
@@ -201,8 +197,6 @@ export interface BookingTemplateRow {
   ordered_qty: number;
   remaining_qty: number;
   load_qty: number;
-  unit_price: number;
-  currency: string;
   container_no: string;
   container_id: number;
   bl_no: string;
@@ -214,8 +208,6 @@ export interface BookingTemplateRow {
 export interface BulkImportRow {
   po_item_id: number;
   load_qty: number;
-  unit_price: number;
-  currency: string;
   container_no: string;
   container_id: number;
   bl_no: string;
@@ -241,8 +233,6 @@ export interface BulkImportPreviewRow {
   item_name: string;
   load_qty: number;
   remaining_qty: number;
-  unit_price: number;
-  currency: string;
   container_no: string;
   container_id: number;
   bl_no: string;
@@ -271,7 +261,6 @@ export interface AP_TargetGroupItem {
   ap_target_group_item_id: number;
   ap_target_group_id: number;
   reference_uuid: string;
-  allocated_amount: number;
   remark: string;
 }
 

@@ -100,8 +100,10 @@ function App() {
         )
       case 'logistics':
         return (
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '1rem' }}>
+          <CrudPage
+            key={`bookings-${bookingsRefreshKey}`}
+            title="Bookings"
+            headerActions={
               <button
                 className="secondary"
                 onClick={() => setShowBulkImport(true)}
@@ -109,10 +111,7 @@ function App() {
               >
                 📥 Bulk Import via Excel
               </button>
-            </div>
-            <CrudPage
-              key={`bookings-${bookingsRefreshKey}`}
-              title="Bookings"
+            }
               columns={[
               { key: 'container_item_id', label: 'ID', formHidden: true, filterType: 'none' },
               { key: 'container_no', label: 'Container No', formHidden: true },
@@ -127,34 +126,11 @@ function App() {
               { key: 'item_name', label: 'Item Name', formHidden: true },
               { key: 'divider_1', label: '', divider: true },
               { key: 'load_qty', label: 'Load Qty', type: 'number', filterType: 'none' },
-              { key: 'unit_price', label: 'Unit Price', type: 'number', tableHidden: true },
-              { key: 'currency', label: 'Billing Currency', tableHidden: true },
               { key: 'cbm', label: 'CBM', type: 'number', formHidden: true },
               { key: 'temporary_eta', label: 'Temporary ETA', type: 'date', filterType: 'none', tableHidden: true },
               { key: 'remark', label: 'Remark', fullWidth: true },
             ]}
             fetchData={procureApi.getBookings}
-            onFieldChange={async (field, value, currentItem) => {
-              if (field === 'po_item_id' && value > 0) {
-                try {
-                  // Find the PO that contains this PO Item
-                  const pos = await procureApi.getPurchaseOrders();
-                  for (const po of pos) {
-                    const poItems = await procureApi.getPOItems(po.po_id);
-                    const found = poItems.find(pi => pi.po_item_id === value);
-                    if (found) {
-                      return {
-                        unit_price: found.unit_price,
-                        currency: po.currency,
-                      };
-                    }
-                  }
-                } catch (e) {
-                  console.error('Failed to fetch PO item details', e);
-                }
-              }
-              return null;
-            }}
             onSave={async (booking: any) => {
               await procureApi.saveContainerItem({
                 container_item_id: booking.container_item_id,
@@ -163,8 +139,6 @@ function App() {
                 po_item_id: booking.po_item_id,
                 ci_id: booking.ci_id || 0,
                 load_qty: booking.load_qty,
-                unit_price: booking.unit_price,
-                currency: booking.currency,
                 gross_weight: booking.gross_weight || 0,
                 net_weight: booking.net_weight || 0,
                 cbm: booking.cbm || 0,
@@ -173,12 +147,11 @@ function App() {
                 remark: booking.remark || '',
               });
             }}
-            emptyItem={{ container_item_id: 0, container_id: 0, container_no: '', status: 'Loaded', total_cbm: 0, total_net_wgt: 0, total_gross_wgt: 0, bl_id: 0, bl_no: '', bl_status: 'Released', etd: null, eta: null, pol: '', pod: '', carrier: '', vessel_name: '', po_item_id: 0, item_id: 0, ci_id: 0, load_qty: 0, unit_price: 0, currency: 'USD', gross_weight: 0, net_weight: 0, cbm: 0, temporary_eta: null, uuid: '', remark: '' }}
+            emptyItem={{ container_item_id: 0, container_id: 0, container_no: '', status: 'Loaded', total_cbm: 0, total_net_wgt: 0, total_gross_wgt: 0, bl_id: 0, bl_no: '', bl_status: 'Released', etd: null, eta: null, pol: '', pod: '', carrier: '', vessel_name: '', po_item_id: 0, item_id: 0, ci_id: 0, load_qty: 0, gross_weight: 0, net_weight: 0, cbm: 0, temporary_eta: null, uuid: '', remark: '' }}
             renderDetail={(booking) => <BookingFlow booking={booking} />}
             tableName="Container_Item"
             idField="container_item_id"
-            />
-          </div>
+          />
         )
       case 'bls':
         return (
@@ -517,7 +490,7 @@ function CIDetail({ ci }: { ci: any }) {
           </tbody>
           {items && items.length > 0 && (
             <tfoot>
-              <tr style={{ fontWeight: 'bold', background: 'rgba(255,255,255,0.05)' }}>
+              <tr style={{ fontWeight: 'bold', background: '#f1f5f9' }}>
                 <td colSpan={2} style={{ textAlign: 'right' }}>Total:</td>
                 <td>{items.reduce((sum, it) => sum + it.total_qty, 0)}</td>
                 <td>{items.reduce((sum, it) => sum + it.amount, 0).toLocaleString()} {items[0]?.currency}</td>
@@ -557,7 +530,7 @@ function CIDetail({ ci }: { ci: any }) {
           </tbody>
         </table>
 
-        <div className="form-grid" style={{ background: 'rgba(255,255,255,0.03)', padding: '1.5rem', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.1)' }}>
+        <div className="form-grid" style={{ background: '#f8fafc', padding: '1.5rem', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
           <div className="form-group">
             <label>AP No</label>
             <input type="text" value={newAp.ap_no} onChange={e => setNewAp({ ...newAp, ap_no: e.target.value })} placeholder="e.g. AP-INV-001" />
@@ -721,7 +694,7 @@ function BookingFlow({ booking }: { booking: any }) {
   const Step = ({ label, value, color }: { label: string, value: string, color: string }) => (
     <div style={{
       flex: 1,
-      background: 'rgba(255,255,255,0.03)',
+      background: '#f8fafc',
       padding: '1rem',
       borderRadius: '8px',
       borderLeft: `4px solid ${color}`,

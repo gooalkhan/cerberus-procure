@@ -135,8 +135,6 @@ type ContainerItem struct {
 	ContainerID int     `json:"container_id"`
 	CIID        int     `json:"ci_id"`
 	BLID        int     `json:"bl_id"`
-	UnitPrice   float64 `json:"unit_price"`
-	Currency    string  `json:"currency"`
 	LoadQty     float64 `json:"load_qty"`
 	GrossWeight float64 `json:"gross_weight"`
 	NetWeight   float64 `json:"net_weight"`
@@ -239,8 +237,6 @@ type BookingView struct {
 	CIID            int       `json:"ci_id"`
 	CINo            string    `json:"ci_no"`
 	LoadQty         float64   `json:"load_qty"`
-	UnitPrice       float64   `json:"unit_price"`
-	Currency        string    `json:"currency"`
 	GrossWeight     float64   `json:"gross_weight"`
 	NetWeight       float64   `json:"net_weight"`
 	CBM             float64   `json:"cbm"`

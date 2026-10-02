@@ -114,7 +114,6 @@ func TestSQLite_SaveContainerItem_POItemStatusSync(t *testing.T) {
 		ContainerID: container.ID,
 		POItemID:    targetPOItem.ID,
 		LoadQty:     4,
-		UnitPrice:   100,
 	}
 	if err := uc.SaveContainerItem(ci1); err != nil {
 		t.Fatalf("Failed to save ContainerItem 1: %v", err)
@@ -135,7 +134,6 @@ func TestSQLite_SaveContainerItem_POItemStatusSync(t *testing.T) {
 		ContainerID: container.ID,
 		POItemID:    targetPOItem.ID,
 		LoadQty:     6,
-		UnitPrice:   100,
 	}
 	if err := uc.SaveContainerItem(ci2); err != nil {
 		t.Fatalf("Failed to save ContainerItem 2: %v", err)

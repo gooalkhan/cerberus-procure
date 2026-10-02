@@ -20,11 +20,10 @@ type AP_TargetGroup struct {
 
 // AP_Target_Group_Item 그룹에 포함된 개별 참조
 type AP_TargetGroupItem struct {
-	ID              int     `json:"ap_target_group_item_id"`
-	GroupID         int     `json:"ap_target_group_id"`
-	ReferenceUUID   string  `json:"reference_uuid"`
-	AllocatedAmount float64 `json:"allocated_amount"`
-	Remark          string  `json:"remark"`
+	ID            int    `json:"ap_target_group_item_id"`
+	GroupID       int    `json:"ap_target_group_id"`
+	ReferenceUUID string `json:"reference_uuid"`
+	Remark        string `json:"remark"`
 }
 
 // APTargetGroupReference 그룹에 추가 가능한 참조 타겟 정보

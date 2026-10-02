@@ -26,6 +26,8 @@ interface CrudPageProps<T> {
   tableName?: string;
   idField?: string;
   onFieldChange?: (field: string, value: any, currentItem: T) => Promise<Partial<T> | null>;
+  headerActions?: React.ReactNode;
+  pageSize?: number;
 }
 
 interface DeleteModalState {
@@ -38,13 +40,14 @@ interface DeleteModalState {
   loading: boolean;
 }
 
-function CrudPage<T extends { [key: string]: any }>({ title, columns, fetchData, onSave, emptyItem, renderDetail, tableName, idField, onFieldChange }: CrudPageProps<T>) {
+function CrudPage<T extends { [key: string]: any }>({ title, columns, fetchData, onSave, emptyItem, renderDetail, tableName, idField, onFieldChange, headerActions, pageSize = 20 }: CrudPageProps<T>) {
   const [data, setData] = useState<T[]>([]);
   const [filteredData, setFilteredData] = useState<T[]>([]);
   const [filters, setFilters] = useState<{ [key: string]: any }>({});
   const [selectedItem, setSelectedItem] = useState<T | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [sortConfig, setSortConfig] = useState<{ key: string, direction: 'asc' | 'desc' } | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
   const [searchConfig, setSearchConfig] = useState<{ type: string, field: string } | null>(null);
   const [deleteModal, setDeleteModal] = useState<DeleteModalState | null>(null);
 
@@ -102,6 +105,7 @@ function CrudPage<T extends { [key: string]: any }>({ title, columns, fetchData,
     }
 
     setFilteredData(result);
+    setCurrentPage(1);
   }, [filters, data, sortConfig]);
 
   const handleRowClick = (item: T) => {
@@ -216,7 +220,10 @@ function CrudPage<T extends { [key: string]: any }>({ title, columns, fetchData,
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
         <h2 className="page-title">{title}</h2>
-        <button onClick={handleAddNew}>+ New Entry</button>
+        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+          {headerActions}
+          <button onClick={handleAddNew}>+ New Entry</button>
+        </div>
       </div>
 
       <div className="filter-panel">
@@ -303,7 +310,12 @@ function CrudPage<T extends { [key: string]: any }>({ title, columns, fetchData,
             </tr>
           </thead>
           <tbody>
-            {filteredData.map((item, idx) => (
+            {(() => {
+              const totalPages = Math.max(1, Math.ceil(filteredData.length / pageSize));
+              const safePage = Math.min(currentPage, totalPages);
+              const start = (safePage - 1) * pageSize;
+              const paginatedData = filteredData.slice(start, start + pageSize);
+              return paginatedData.map((item, idx) => (
               <tr key={idx} onClick={() => handleRowClick(item)}>
                 {tableName && (
                   <td style={{ textAlign: 'center', padding: '0.4rem' }} onClick={e => e.stopPropagation()}>
@@ -332,10 +344,35 @@ function CrudPage<T extends { [key: string]: any }>({ title, columns, fetchData,
                   );
                 })}
               </tr>
-            ))}
+            ));
+            })()}
           </tbody>
         </table>
       </div>
+
+      {filteredData.length > pageSize && (
+        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '0.5rem', marginTop: '1rem' }}>
+          <button
+            className="secondary"
+            onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+            disabled={currentPage === 1}
+            style={{ padding: '0.4rem 0.8rem' }}
+          >
+            ← Prev
+          </button>
+          <span style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+            Page {currentPage} of {Math.max(1, Math.ceil(filteredData.length / pageSize))}
+          </span>
+          <button
+            className="secondary"
+            onClick={() => setCurrentPage(p => Math.min(Math.ceil(filteredData.length / pageSize), p + 1))}
+            disabled={currentPage === Math.ceil(filteredData.length / pageSize)}
+            style={{ padding: '0.4rem 0.8rem' }}
+          >
+            Next →
+          </button>
+        </div>
+      )}
 
       {/* Edit Modal */}
       {isModalOpen && selectedItem && (
@@ -454,23 +491,23 @@ function CrudPage<T extends { [key: string]: any }>({ title, columns, fetchData,
             ) : deleteModal.references.length > 0 ? (
               <div>
                 <div style={{
-                  background: 'rgba(239, 68, 68, 0.1)',
-                  border: '1px solid rgba(239, 68, 68, 0.3)',
+                  background: 'rgba(239, 68, 68, 0.08)',
+                  border: '1px solid rgba(239, 68, 68, 0.25)',
                   borderRadius: '8px',
                   padding: '1rem',
                   marginBottom: '1rem'
                 }}>
-                  <p style={{ color: '#fca5a5', fontWeight: 600, marginBottom: '0.5rem' }}>
+                  <p style={{ color: '#b91c1c', fontWeight: 600, marginBottom: '0.5rem' }}>
                     ⚠️ 이 레코드는 {deleteModal.totalRefs}개의 다른 데이터에서 참조하고 있어 삭제할 수 없습니다.
                   </p>
-                  <p style={{ color: '#fca5a5', fontSize: '0.85rem' }}>
+                  <p style={{ color: '#b91c1c', fontSize: '0.85rem' }}>
                     아래 데이터를 먼저 삭제한 후 다시 시도해 주세요.
                   </p>
                 </div>
 
                 {deleteModal.references.map((ref, idx) => (
                   <div key={idx} style={{
-                    background: 'rgba(255,255,255,0.03)',
+                    background: '#f8fafc',
                     border: '1px solid var(--border-color)',
                     borderRadius: '8px',
                     padding: '1rem',
@@ -511,13 +548,13 @@ function CrudPage<T extends { [key: string]: any }>({ title, columns, fetchData,
               </div>
             ) : (
               <div style={{
-                background: 'rgba(16, 185, 129, 0.1)',
-                border: '1px solid rgba(16, 185, 129, 0.3)',
+                background: 'rgba(16, 185, 129, 0.08)',
+                border: '1px solid rgba(16, 185, 129, 0.25)',
                 borderRadius: '8px',
                 padding: '1rem',
                 marginBottom: '1rem'
               }}>
-                <p style={{ color: '#6ee7b7' }}>
+                <p style={{ color: '#047857' }}>
                   ✅ 이 레코드를 참조하는 다른 데이터가 없어 안전하게 삭제할 수 있습니다.
                 </p>
               </div>

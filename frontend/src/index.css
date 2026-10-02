@@ -1,13 +1,13 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;600;700&display=swap');
 
 :root {
-  --bg-color: #0f172a;
-  --panel-bg: #1e293b;
-  --accent-color: #38bdf8;
-  --text-primary: #f8fafc;
-  --text-secondary: #94a3b8;
-  --border-color: #334155;
-  --hover-bg: #334155;
+  --bg-color: #f8fafc;
+  --panel-bg: #ffffff;
+  --accent-color: #0284c7;
+  --text-primary: #0f172a;
+  --text-secondary: #64748b;
+  --border-color: #e2e8f0;
+  --hover-bg: #f1f5f9;
   --active-bg: #0ea5e9;
   --success: #10b981;
   --danger: #ef4444;
@@ -90,12 +90,12 @@ h1, h2, h3 {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: radial-gradient(circle at 50% 0%, #1e293b 0%, #0f172a 100%);
+  background: radial-gradient(circle at 50% 0%, #ffffff 0%, #f1f5f9 100%);
 }
 
 header {
   padding: 1rem 2rem;
-  background-color: rgba(30, 41, 59, 0.5);
+  background-color: rgba(255, 255, 255, 0.8);
   backdrop-filter: blur(8px);
   border-bottom: 1px solid var(--border-color);
   display: flex;
@@ -113,7 +113,7 @@ header {
 .page-title {
   font-size: 1.75rem;
   margin-bottom: 1.5rem;
-  background: linear-gradient(to right, #fff, #94a3b8);
+  background: linear-gradient(to right, #0f172a, #475569);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
 }
@@ -142,17 +142,18 @@ header {
 }
 
 input, select {
-  background-color: #0f172a;
+  background-color: #ffffff;
   border: 1px solid var(--border-color);
-  color: white;
+  color: var(--text-primary);
   padding: 0.6rem 1rem;
   border-radius: 8px;
   outline: none;
-  transition: border-color 0.2s;
+  transition: border-color 0.2s, box-shadow 0.2s;
 }
 
-input:focus {
+input:focus, select:focus {
   border-color: var(--accent-color);
+  box-shadow: 0 0 0 3px rgba(2, 132, 199, 0.1);
 }
 
 button {
@@ -177,6 +178,11 @@ button:active {
 button.secondary {
   background-color: transparent;
   border: 1px solid var(--border-color);
+  color: var(--text-primary);
+}
+
+button.secondary:hover {
+  background-color: var(--hover-bg);
 }
 
 /* Table */
@@ -196,7 +202,7 @@ table {
 th {
   text-align: left;
   padding: 0.75rem 1rem;
-  background-color: rgba(15, 23, 42, 0.5);
+  background-color: #f8fafc;
   font-size: 0.75rem;
   text-transform: uppercase;
   color: var(--text-secondary);
@@ -210,7 +216,7 @@ td {
 }
 
 tr:hover td {
-  background-color: rgba(14, 165, 233, 0.05);
+  background-color: rgba(2, 132, 199, 0.05);
   cursor: pointer;
 }
 
@@ -221,7 +227,7 @@ tr:hover td {
   left: 0;
   right: 0;
   bottom: 0;
-  background-color: rgba(0, 0, 0, 0.7);
+  background-color: rgba(15, 23, 42, 0.4);
   display: flex;
   justify-content: center;
   align-items: center;
@@ -280,7 +286,7 @@ tr:hover td {
   display: flex;
   justify-content: center;
   align-items: center;
-  background: radial-gradient(circle at 50% 50%, #1e293b 0%, #0f172a 100%);
+  background: radial-gradient(circle at 50% 50%, #ffffff 0%, #e2e8f0 100%);
 }
 
 .login-form {
@@ -290,7 +296,7 @@ tr:hover td {
   border: 1px solid var(--border-color);
   width: 100%;
   max-width: 400px;
-  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 25px 50px -12px rgba(15, 23, 42, 0.15);
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
@@ -324,12 +330,12 @@ tr:hover td {
   min-width: unset;
   border-collapse: collapse;
   margin-top: 1rem;
-  background-color: rgba(15, 23, 42, 0.3);
+  background-color: #f8fafc;
   border-radius: 8px;
   overflow: hidden;
 }
 .sub-table th {
-  background-color: rgba(51, 65, 85, 0.5);
+  background-color: #f1f5f9;
   font-size: 0.75rem;
   padding: 0.75rem;
 }
@@ -339,5 +345,5 @@ tr:hover td {
   border-top: 1px solid var(--border-color);
 }
 .sub-table tr:hover td {
-  background-color: rgba(14, 165, 233, 0.05);
+  background-color: rgba(2, 132, 199, 0.05);
 }

@@ -15,7 +15,6 @@ export default function AP_TargetGroupDetail({ group, onChange }: AP_TargetGroup
   const [showRefSelector, setShowRefSelector] = useState(false);
   const [selectedRefType, setSelectedRefType] = useState(group.reference_type || 'PO');
   const [selectedRefUUID, setSelectedRefUUID] = useState('');
-  const [allocatedAmount, setAllocatedAmount] = useState('');
 
   const groupType = group.reference_type || 'PO';
   const REF_TYPES = ['PO', 'CI', 'BL', 'Container', 'Container Item', 'GR', 'Lot'];
@@ -91,7 +90,6 @@ export default function AP_TargetGroupDetail({ group, onChange }: AP_TargetGroup
       ap_target_group_item_id: 0,
       ap_target_group_id: targetGroupId,
       reference_uuid: selectedRefUUID,
-      allocated_amount: Number(allocatedAmount) || 0,
       remark: '',
     };
 
@@ -102,7 +100,6 @@ export default function AP_TargetGroupDetail({ group, onChange }: AP_TargetGroup
       updateParent(updated);
       setShowRefSelector(false);
       setSelectedRefUUID('');
-      setAllocatedAmount('');
     } catch (e: any) {
       alert(`추가 실패: ${e.message}`);
     }
@@ -133,7 +130,7 @@ export default function AP_TargetGroupDetail({ group, onChange }: AP_TargetGroup
     <div style={{ marginTop: '2rem', borderTop: '1px solid var(--border-color)', paddingTop: '1.5rem' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
         <h3 style={{ color: 'var(--accent-color)' }}>Grouped AP References</h3>
-        <button className="secondary" style={{ padding: '0.3rem 0.8rem', fontSize: '0.8rem' }} onClick={() => { setSelectedRefType(groupType); setSelectedRefUUID(''); setAllocatedAmount(''); setShowRefSelector(true); }}>
+        <button className="secondary" style={{ padding: '0.3rem 0.8rem', fontSize: '0.8rem' }} onClick={() => { setSelectedRefType(groupType); setSelectedRefUUID(''); setShowRefSelector(true); }}>
           + Add Reference
         </button>
       </div>
@@ -147,7 +144,6 @@ export default function AP_TargetGroupDetail({ group, onChange }: AP_TargetGroup
               <tr>
                 <th>Reference Type</th>
                 <th>Reference</th>
-                <th style={{ textAlign: 'right' }}>Allocated Amount</th>
                 <th style={{ width: '50px' }}></th>
               </tr>
             </thead>
@@ -156,24 +152,14 @@ export default function AP_TargetGroupDetail({ group, onChange }: AP_TargetGroup
                 <tr key={idx}>
                   <td>{groupType}</td>
                   <td style={{ fontSize: '0.85rem' }}>{getRefDisplay(item.reference_uuid)}</td>
-                  <td style={{ textAlign: 'right' }}>{item.allocated_amount?.toLocaleString()}</td>
                   <td>
                     <button className="btn-danger secondary" style={{ padding: '0.2rem 0.5rem' }} onClick={() => handleRemoveItem(idx, item)}>✕</button>
                   </td>
                 </tr>
               ))}
-              {items.length > 0 && (
-                <tr style={{ background: 'rgba(14, 165, 233, 0.05)' }}>
-                  <td colSpan={2} style={{ textAlign: 'right', fontWeight: 700 }}>Total Allocated:</td>
-                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--accent-color)' }}>
-                    {items.reduce((acc, it) => acc + (it.allocated_amount || 0), 0).toLocaleString()}
-                  </td>
-                  <td></td>
-                </tr>
-              )}
               {items.length === 0 && (
                 <tr>
-                  <td colSpan={4} style={{ textAlign: 'center', padding: '1rem' }}>No references grouped. Click "+ Add Reference" to add PO, CI, BL, etc.</td>
+                  <td colSpan={3} style={{ textAlign: 'center', padding: '1rem' }}>No references grouped. Click "+ Add Reference" to add PO, CI, BL, etc.</td>
                 </tr>
               )}
             </tbody>
@@ -195,7 +181,7 @@ export default function AP_TargetGroupDetail({ group, onChange }: AP_TargetGroup
                   {REF_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
                 </select>
                 {selectedRefType !== groupType && (
-                  <small style={{ color: '#fca5a5' }}>This group only allows {groupType} references.</small>
+                  <small style={{ color: '#b91c1c' }}>This group only allows {groupType} references.</small>
                 )}
               </div>
               <div className="form-group">
@@ -208,10 +194,6 @@ export default function AP_TargetGroupDetail({ group, onChange }: AP_TargetGroup
                     </option>
                   ))}
                 </select>
-              </div>
-              <div className="form-group">
-                <label>Allocated Amount (Optional)</label>
-                <input type="number" value={allocatedAmount} onChange={e => setAllocatedAmount(e.target.value)} placeholder="0" />
               </div>
             </div>
             <div className="modal-actions">

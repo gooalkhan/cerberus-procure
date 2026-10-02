@@ -141,8 +141,6 @@ func migrateProcurement(db *sql.DB) error {
 			Container_ID INTEGER,
 			CI_ID INTEGER,
 			BL_ID INTEGER,
-			Unit_Price REAL,
-			Currency TEXT,
 			Load_Qty REAL,
 			Gross_Weight REAL,
 			Net_Weight REAL,
@@ -228,7 +226,6 @@ func migrateProcurement(db *sql.DB) error {
 			Group_Item_ID INTEGER PRIMARY KEY AUTOINCREMENT,
 			Group_ID INTEGER NOT NULL,
 			Reference_UUID TEXT NOT NULL,
-			Allocated_Amount REAL,
 			Remark TEXT,
 			FOREIGN KEY (Group_ID) REFERENCES AP_Target_Group(Group_ID) ON DELETE CASCADE
 		)`,
@@ -379,12 +376,12 @@ func migrateProcurement(db *sql.DB) error {
 	}
 
 	// Schema migrations for AP_Target_Group (tolerate errors if already applied)
-	_ = migrateAPTargetGroupSchema(db)
+	_ = migrateLegacySchemas(db)
 
 	return nil
 }
 
-func migrateAPTargetGroupSchema(db *sql.DB) error {
+func migrateLegacySchemas(db *sql.DB) error {
 	// Add Reference_Type to AP_Target_Group if missing
 	var hasRefType int
 	err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('AP_Target_Group') WHERE name = 'Reference_Type'`).Scan(&hasRefType)
@@ -401,10 +398,22 @@ func migrateAPTargetGroupSchema(db *sql.DB) error {
 		}
 	}
 
-	// Drop Reference_Type from AP_Target_Group_Item if exists
-	err = db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('AP_Target_Group_Item') WHERE name = 'Reference_Type'`).Scan(&hasRefType)
-	if err == nil && hasRefType == 1 {
-		_, _ = db.Exec(`ALTER TABLE AP_Target_Group_Item DROP COLUMN Reference_Type`)
+	// Drop legacy columns from AP_Target_Group_Item if they still exist (Allocated_Amount, Reference_Type)
+	for _, col := range []string{"Allocated_Amount", "Reference_Type"} {
+		var has int
+		err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('AP_Target_Group_Item') WHERE name = ?`, col).Scan(&has)
+		if err == nil && has == 1 {
+			_, _ = db.Exec(fmt.Sprintf(`ALTER TABLE AP_Target_Group_Item DROP COLUMN %s`, col))
+		}
+	}
+
+	// Drop legacy columns from Container_Item if they still exist (Unit_Price, Currency)
+	for _, col := range []string{"Unit_Price", "Currency"} {
+		var has int
+		err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('Container_Item') WHERE name = ?`, col).Scan(&has)
+		if err == nil && has == 1 {
+			_, _ = db.Exec(fmt.Sprintf(`ALTER TABLE Container_Item DROP COLUMN %s`, col))
+		}
 	}
 	return nil
 }
@@ -616,12 +625,13 @@ func (r *SQLiteProcurementRepository) GetCommercialInvoices() ([]models.Commerci
 }
 
 func (r *SQLiteProcurementRepository) GetCIAggregatedItems(ciID int) ([]models.CIAggregatedItem, error) {
-	query := `SELECT pi.Item_ID, im.Name, SUM(ci.Load_Qty), SUM(ci.Load_Qty * ci.Unit_Price), ci.Currency
+	query := `SELECT pi.Item_ID, im.Name, SUM(ci.Load_Qty), SUM(ci.Load_Qty * pi.Unit_Price), po.Currency
 	          FROM Container_Item ci
 	          JOIN PO_Item pi ON ci.PO_Item_ID = pi.PO_Item_ID
+	          JOIN Purchase_Order po ON pi.PO_ID = po.PO_ID
 	          LEFT JOIN Item_Master im ON pi.Item_ID = im.Item_ID
 	          WHERE ci.CI_ID = ?
-	          GROUP BY pi.Item_ID, im.Name, ci.Currency`
+	          GROUP BY pi.Item_ID, im.Name, po.Currency`
 	rows, err := r.db.Query(query, ciID)
 	if err != nil {
 		return nil, err
@@ -880,10 +890,10 @@ func (r *SQLiteProcurementRepository) SaveCostAllocation(ca *models.CostAllocati
 // Container Items
 func (r *SQLiteProcurementRepository) GetContainerItemsByContainerID(containerID int) ([]models.ContainerItem, error) {
 	rows, err := r.db.Query(`
-		SELECT 
-			ci.Container_Item_ID, ci.PO_Item_ID, IFNULL(ci.Container_ID, 0), IFNULL(ci.CI_ID, 0), IFNULL(ci.BL_ID, 0), 
-			IFNULL(ci.Unit_Price, 0), IFNULL(ci.Currency, ''), IFNULL(ci.Load_Qty, 0), 
-			IFNULL(ci.Gross_Weight, 0), IFNULL(ci.Net_Weight, 0), IFNULL(ci.Cbm, 0), ci.Temporary_ETA, IFNULL(ci.UUID, ''), IFNULL(ci.Remark, '') 
+		SELECT
+			ci.Container_Item_ID, ci.PO_Item_ID, IFNULL(ci.Container_ID, 0), IFNULL(ci.CI_ID, 0), IFNULL(ci.BL_ID, 0),
+			IFNULL(ci.Load_Qty, 0),
+			IFNULL(ci.Gross_Weight, 0), IFNULL(ci.Net_Weight, 0), IFNULL(ci.Cbm, 0), ci.Temporary_ETA, IFNULL(ci.UUID, ''), IFNULL(ci.Remark, '')
 		FROM Container_Item ci
 		WHERE ci.Container_ID = ?`, containerID)
 	if err != nil {
@@ -894,7 +904,7 @@ func (r *SQLiteProcurementRepository) GetContainerItemsByContainerID(containerID
 	for rows.Next() {
 		var i models.ContainerItem
 		var tempEta *time.Time
-		err := rows.Scan(&i.ID, &i.POItemID, &i.ContainerID, &i.CIID, &i.BLID, &i.UnitPrice, &i.Currency, &i.LoadQty, &i.GrossWeight, &i.NetWeight, &i.CBM, &tempEta, &i.UUID, &i.Remark)
+		err := rows.Scan(&i.ID, &i.POItemID, &i.ContainerID, &i.CIID, &i.BLID, &i.LoadQty, &i.GrossWeight, &i.NetWeight, &i.CBM, &tempEta, &i.UUID, &i.Remark)
 		if err != nil {
 			return nil, err
 		}
@@ -909,11 +919,11 @@ func (r *SQLiteProcurementRepository) GetContainerItemsByContainerID(containerID
 func (r *SQLiteProcurementRepository) SaveContainerItem(i *models.ContainerItem) error {
 	var err error
 	if i.ID == 0 {
-		_, err = r.db.Exec(`INSERT INTO Container_Item (PO_Item_ID, Container_ID, CI_ID, BL_ID, Unit_Price, Currency, Load_Qty, Gross_Weight, Net_Weight, Cbm, Temporary_ETA, UUID, Remark) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			i.POItemID, i.ContainerID, i.CIID, i.BLID, i.UnitPrice, i.Currency, i.LoadQty, i.GrossWeight, i.NetWeight, i.CBM, nullIfZero(i.TemporaryETA), i.UUID, i.Remark)
+		_, err = r.db.Exec(`INSERT INTO Container_Item (PO_Item_ID, Container_ID, CI_ID, BL_ID, Load_Qty, Gross_Weight, Net_Weight, Cbm, Temporary_ETA, UUID, Remark) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			i.POItemID, i.ContainerID, i.CIID, i.BLID, i.LoadQty, i.GrossWeight, i.NetWeight, i.CBM, nullIfZero(i.TemporaryETA), i.UUID, i.Remark)
 	} else {
-		_, err = r.db.Exec(`UPDATE Container_Item SET PO_Item_ID=?, Container_ID=?, CI_ID=?, BL_ID=?, Unit_Price=?, Currency=?, Load_Qty=?, Gross_Weight=?, Net_Weight=?, Cbm=?, Temporary_ETA=?, UUID=?, Remark=? WHERE Container_Item_ID=?`,
-			i.POItemID, i.ContainerID, i.CIID, i.BLID, i.UnitPrice, i.Currency, i.LoadQty, i.GrossWeight, i.NetWeight, i.CBM, nullIfZero(i.TemporaryETA), i.UUID, i.Remark, i.ID)
+		_, err = r.db.Exec(`UPDATE Container_Item SET PO_Item_ID=?, Container_ID=?, CI_ID=?, BL_ID=?, Load_Qty=?, Gross_Weight=?, Net_Weight=?, Cbm=?, Temporary_ETA=?, UUID=?, Remark=? WHERE Container_Item_ID=?`,
+			i.POItemID, i.ContainerID, i.CIID, i.BLID, i.LoadQty, i.GrossWeight, i.NetWeight, i.CBM, nullIfZero(i.TemporaryETA), i.UUID, i.Remark, i.ID)
 	}
 	return err
 }
@@ -982,16 +992,14 @@ func (r *SQLiteProcurementRepository) GetUnbookedPOItems() ([]models.BookingTemp
 			im.Name,
 			vm.Name,
 			pi.PO_Qty,
-			pi.PO_Qty - IFNULL(SUM(ci.Load_Qty), 0) as Remaining_Qty,
-			pi.Unit_Price,
-			p.Currency
+			pi.PO_Qty - IFNULL(SUM(ci.Load_Qty), 0) as Remaining_Qty
 		FROM PO_Item pi
 		JOIN Purchase_Order p ON pi.PO_ID = p.PO_ID
 		JOIN Item_Master im ON pi.Item_ID = im.Item_ID
 		JOIN Vendor_Master vm ON p.Vendor_ID = vm.Vendor_ID
 		LEFT JOIN Container_Item ci ON pi.PO_Item_ID = ci.PO_Item_ID
 		WHERE p.Status = 'Open'
-		GROUP BY pi.PO_Item_ID, p.PO_No, im.SKU_Code, im.Name, vm.Name, pi.PO_Qty, pi.Unit_Price, p.Currency
+		GROUP BY pi.PO_Item_ID, p.PO_No, im.SKU_Code, im.Name, vm.Name, pi.PO_Qty
 		HAVING Remaining_Qty > 0
 		ORDER BY p.PO_No, pi.PO_Item_ID
 	`
@@ -1005,7 +1013,7 @@ func (r *SQLiteProcurementRepository) GetUnbookedPOItems() ([]models.BookingTemp
 	for rows.Next() {
 		var row models.BookingTemplateRow
 		err := rows.Scan(&row.POItemID, &row.PONo, &row.SKUCode, &row.ItemName, &row.VendorName,
-			&row.OrderedQty, &row.RemainingQty, &row.UnitPrice, &row.Currency)
+			&row.OrderedQty, &row.RemainingQty)
 		if err != nil {
 			return nil, err
 		}
@@ -1043,8 +1051,6 @@ func (r *SQLiteProcurementRepository) GetBookings() ([]models.BookingView, error
 			IFNULL(ci.CI_ID, 0),
 			IFNULL(ci_tbl.CI_No, ''),
 			IFNULL(ci.Load_Qty, 0),
-			IFNULL(ci.Unit_Price, 0),
-			IFNULL(ci.Currency, ''),
 			IFNULL(ci.Gross_Weight, 0),
 			IFNULL(ci.Net_Weight, 0),
 			IFNULL(ci.Cbm, 0),
@@ -1083,7 +1089,7 @@ func (r *SQLiteProcurementRepository) GetBookings() ([]models.BookingView, error
 			&b.TotalCBM, &b.TotalNetWgt, &b.TotalGrossWgt,
 			&b.BLID, &b.BLNo, &b.BLStatus, &etd, &eta,
 			&b.POL, &b.POD, &b.Carrier, &b.VesselName,
-			&b.POItemID, &b.POID, &b.PONo, &b.ItemID, &b.ItemName, &b.CIID, &b.CINo, &b.LoadQty, &b.UnitPrice, &b.Currency,
+			&b.POItemID, &b.POID, &b.PONo, &b.ItemID, &b.ItemName, &b.CIID, &b.CINo, &b.LoadQty,
 			&b.GrossWeight, &b.NetWeight, &b.CBM, &tempEta, &b.Remark,
 		)
 		if err != nil {
@@ -1151,7 +1157,7 @@ func (r *SQLiteProcurementRepository) GetAPTargetGroupByID(id int) (*models.AP_T
 
 func (r *SQLiteProcurementRepository) GetAPTargetGroupItems(groupID int) ([]models.AP_TargetGroupItem, error) {
 	rows, err := r.db.Query(`
-		SELECT Group_Item_ID, Group_ID, IFNULL(Reference_UUID, ''), IFNULL(Allocated_Amount, 0), IFNULL(Remark, '')
+		SELECT Group_Item_ID, Group_ID, IFNULL(Reference_UUID, ''), IFNULL(Remark, '')
 		FROM AP_Target_Group_Item WHERE Group_ID = ?`, groupID)
 	if err != nil {
 		return nil, err
@@ -1161,7 +1167,7 @@ func (r *SQLiteProcurementRepository) GetAPTargetGroupItems(groupID int) ([]mode
 	list := []models.AP_TargetGroupItem{}
 	for rows.Next() {
 		var i models.AP_TargetGroupItem
-		err := rows.Scan(&i.ID, &i.GroupID, &i.ReferenceUUID, &i.AllocatedAmount, &i.Remark)
+		err := rows.Scan(&i.ID, &i.GroupID, &i.ReferenceUUID, &i.Remark)
 		if err != nil {
 			return nil, err
 		}
@@ -1193,9 +1199,9 @@ func (r *SQLiteProcurementRepository) SaveAPTargetGroup(g *models.AP_TargetGroup
 func (r *SQLiteProcurementRepository) SaveAPTargetGroupItem(item *models.AP_TargetGroupItem) error {
 	if item.ID == 0 {
 		res, err := r.db.Exec(`
-			INSERT INTO AP_Target_Group_Item (Group_ID, Reference_UUID, Allocated_Amount, Remark) 
-			VALUES (?, ?, ?, ?)`,
-			item.GroupID, item.ReferenceUUID, item.AllocatedAmount, item.Remark)
+			INSERT INTO AP_Target_Group_Item (Group_ID, Reference_UUID, Remark)
+			VALUES (?, ?, ?)`,
+			item.GroupID, item.ReferenceUUID, item.Remark)
 		if err != nil {
 			return err
 		}
@@ -1204,9 +1210,9 @@ func (r *SQLiteProcurementRepository) SaveAPTargetGroupItem(item *models.AP_Targ
 		return nil
 	}
 	_, err := r.db.Exec(`
-		UPDATE AP_Target_Group_Item SET Group_ID=?, Reference_UUID=?, Allocated_Amount=?, Remark=? 
+		UPDATE AP_Target_Group_Item SET Group_ID=?, Reference_UUID=?, Remark=?
 		WHERE Group_Item_ID=?`,
-		item.GroupID, item.ReferenceUUID, item.AllocatedAmount, item.Remark, item.ID)
+		item.GroupID, item.ReferenceUUID, item.Remark, item.ID)
 	return err
 }
 
@@ -1299,7 +1305,11 @@ func (r *SQLiteProcurementRepository) GetAllReferenceTargets() ([]models.APTarge
 	}
 
 	// Container_Item
-	rows, err = r.db.Query("SELECT Container_Item_ID, Load_Qty, Unit_Price, Currency, UUID FROM Container_Item")
+	rows, err = r.db.Query(`
+		SELECT ci.Container_Item_ID, ci.Load_Qty, IFNULL(pi.Unit_Price, 0), IFNULL(po.Currency, ''), IFNULL(ci.UUID, '')
+		FROM Container_Item ci
+		JOIN PO_Item pi ON ci.PO_Item_ID = pi.PO_Item_ID
+		JOIN Purchase_Order po ON pi.PO_ID = po.PO_ID`)
 	if err == nil {
 		defer rows.Close()
 		for rows.Next() {

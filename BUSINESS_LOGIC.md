@@ -34,7 +34,7 @@
 다양한 출처의 비용을 단일 채무 창구(`Account_Payable`)로 집결시켜 통합 관리합니다.
 
 *   **다형성 참조 (Polymorphic Reference)**: `Account_Payable`은 `Reference_UUID`와 `Reference_Type`을 통해 PO, CI, BL, Container, Container_Item, GR, Lot 등 다양한 원천 문서와 유연하게 연결됩니다. 단, `Container_Item`이나 `Lot`의 경우, 수량이 변경되면 그때마다 새로 `UUID`를 적용합니다. 이는 수량이 변경되어도 기존 `UUID`를 유지하면 연결된 `AP`의 배분시 수량이 달라져서 논리적인 오류가 발생하기 때문입니다.
-*   **AP 타겟 그룹 (AP Target Group)**: 여러 PO, 여러 CI, 여러 BL 등 **동일 종류의 원천 문서**를 하나의 그룹 UUID로 묶어 1회 청구형 AP를 발행할 수 있습니다. 그룹은 `AP_Target_Group`과 `AP_Target_Group_Item`으로 관리되며, `AP_Target_Group.Reference_Type`에 의해 그룹이 대표하는 문서 종류가 결정됩니다(PO, CI, BL, Container, Container_Item, GR, Lot). 발행된 AP는 그룹의 UUID를 `Reference_UUID`로, `Reference_Type`을 `AP_Target_Group`으로 참조합니다. 그룹 내 개별 문서는 `AP_Target_Group_Item.Reference_UUID`에 기록되어 Audit Trail을 제공합니다. 그룹의 총액은 그룹에 속한 개별 항목들의 `Allocated_Amount` 합산으로 산출되며, 벤더/통화 정볼는 기저 문서에서 파생됩니다.
+*   **AP 타겟 그룹 (AP Target Group)**: 여러 PO, 여러 CI, 여러 BL 등 **동일 종류의 원천 문서**를 하나의 그룹 UUID로 묶어 1회 청구형 AP를 발행할 수 있습니다. 그룹은 `AP_Target_Group`과 `AP_Target_Group_Item`으로 관리되며, `AP_Target_Group.Reference_Type`에 의해 그룹이 대표하는 문서 종류가 결정됩니다(PO, CI, BL, Container, Container_Item, GR, Lot). 발행된 AP는 그룹의 UUID를 `Reference_UUID`로, `Reference_Type`을 `AP_Target_Group`으로 참조합니다. 그룹 내 개별 문서는 `AP_Target_Group_Item.Reference_UUID`에 기록되어 단순 참조 목록(Audit Trail)을 제공합니다.
 *   **다국어 및 환율 처리**: 모든 채무는 발생 통화(Currency)와 함께 배분/결제 시점의 환율을 적용한 `Local_Amount`(현지 통화 금액)를 병행 기록하여 정확한 외환 차손익 및 원가 계산을 지원합니다.
 *   **확정 데이터 중심 운영**: 예측치가 아닌, 유저가 수동으로 확정한 전표(PO 선금, CI 잔액, 부대비용 청구서)만을 공식 현금흐름에 반영합니다.
 *   **마이너스 전표 기반 크레딧 노트**: 부족분(Shortage)이나 파손에 대한 클레임은 마이너스(-) 금액의 AP 전표를 발행하여 PO또는 CI 앞으로 발행된 AP에 대한 채무액을 자동 상쇄하는 방식으로 처리합니다.
