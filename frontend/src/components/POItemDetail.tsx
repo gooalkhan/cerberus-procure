@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { POItem, PurchaseOrder } from '../api/models';
+import { POItem, PurchaseOrder, POAllocationWarning } from '../api/models';
 import { procureApi } from '../api/procureApi';
 import SearchModal from './SearchModal';
 
@@ -22,10 +22,19 @@ const POItemDetail: React.FC<POItemDetailProps> = ({ po, onChange }) => {
   const [newAp, setNewAp] = useState({ ap_no: '', currency: po.currency || 'USD', amount: 0, due_date: null as string | null });
   const [itemSearchOpen, setItemSearchOpen] = useState(false);
   const [itemMasterMap, setItemMasterMap] = useState<Map<number, { name: string; sku_code: string }>>(new Map());
+  const [allocationWarning, setAllocationWarning] = useState<POAllocationWarning | null>(null);
 
   useEffect(() => {
     if (po.po_id && (!po.items || po.items.length === 0)) {
       loadItems();
+    }
+  }, [po.po_id]);
+
+  useEffect(() => {
+    if (po.po_id) {
+      procureApi.getPOAllocationWarning(po.po_id).then(setAllocationWarning).catch(() => setAllocationWarning(null));
+    } else {
+      setAllocationWarning(null);
     }
   }, [po.po_id]);
 
@@ -130,6 +139,25 @@ const POItemDetail: React.FC<POItemDetailProps> = ({ po, onChange }) => {
 
   return (
     <div style={{ marginTop: '2rem', borderTop: '1px solid var(--border-color)', paddingTop: '1.5rem' }}>
+      {allocationWarning?.has_allocation && (
+        <div style={{ 
+          background: '#fff7ed', 
+          border: '1px solid #f97316', 
+          borderRadius: '8px', 
+          padding: '1rem', 
+          marginBottom: '1.5rem',
+          color: '#c2410c'
+        }}>
+          <strong>⚠️ Cost Allocation Warning</strong>
+          <div style={{ marginTop: '0.25rem', fontSize: '0.9rem' }}>
+            This PO has already been used in Cost Allocation.
+            {' '}Allocated lots: <strong>{allocationWarning.allocated_lot_count}</strong>,
+            {' '}Total allocated amount: <strong>{allocationWarning.total_allocated_amount.toLocaleString()}</strong>.
+            <br />
+            Changes to PO items may affect existing allocation ratios. Please proceed with caution.
+          </div>
+        </div>
+      )}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
         <h3 style={{ color: 'var(--accent-color)' }}>PO Items</h3>
         <button className="secondary" style={{ padding: '0.3rem 0.8rem', fontSize: '0.8rem' }} onClick={handleAddItem}>+ Add Item</button>

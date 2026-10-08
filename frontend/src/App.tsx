@@ -24,6 +24,27 @@ function App() {
   const [showBulkImport, setShowBulkImport] = useState(false)
   const [bookingsRefreshKey, setBookingsRefreshKey] = useState(0)
 
+  const savePurchaseOrderWithWarning = async (po: any) => {
+    if (po.po_id) {
+      try {
+        const warning = await procureApi.getPOAllocationWarning(po.po_id);
+        if (warning.has_allocation) {
+          const confirmed = window.confirm(
+            `This PO has already been used in Cost Allocation.\n` +
+            `- Allocated lots: ${warning.allocated_lot_count}\n` +
+            `- Total allocated amount: ${warning.total_allocated_amount.toLocaleString()}\n\n` +
+            `Modifying PO items may affect existing allocation ratios. Do you want to proceed?`
+          );
+          if (!confirmed) throw new Error('User cancelled');
+        }
+      } catch (e: any) {
+        if (e.message === 'User cancelled') throw e;
+        // Ignore warning fetch errors and proceed with save
+      }
+    }
+    return procureApi.savePurchaseOrder(po);
+  }
+
   useEffect(() => {
     getSession().then(u => {
       if (u) setUser(u)
@@ -99,7 +120,7 @@ function App() {
               { key: 'remark', label: 'Remark', fullWidth: true },
             ]}
             fetchData={procureApi.getPurchaseOrders}
-            onSave={procureApi.savePurchaseOrder}
+            onSave={savePurchaseOrderWithWarning}
             emptyItem={{ po_id: 0, po_no: '', po_date: new Date().toISOString(), vendor_id: 0, currency: 'USD', total_amount: 0, status: 'Open', remark: '', uuid: '' }}
             renderDetail={(po, onChange) => <POItemDetail po={po} onChange={onChange} />}
             tableName="Purchase_Order"

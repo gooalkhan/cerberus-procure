@@ -80,6 +80,8 @@ type ProcurementRepository interface {
 	GetAllCostAllocationLotCandidates() ([]models.CostAllocationLotCandidate, error)
 	GetCostAllocationReferenceBaseUnits(refType string, refID int) ([]models.CostAllocationBaseUnit, error)
 	GetAPIDsUsedForLots(lotIDs []int) (map[int]bool, error)
+	GetCostAllocationSummaryByAP(apID int) (totalAmount float64, lotIDs []int, err error)
+	GetCostAllocationWarningByPO(poID int) (*models.POAllocationWarning, error)
 
 	// Unified Views
 	GetBookings() ([]models.BookingView, error)

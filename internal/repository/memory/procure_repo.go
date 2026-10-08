@@ -745,6 +745,18 @@ func (r *MemoryProcurementRepository) GetAPIDsUsedForLots(lotIDs []int) (map[int
 	return make(map[int]bool), nil
 }
 
+func (r *MemoryProcurementRepository) GetCostAllocationSummaryByAP(apID int) (float64, []int, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return 0, []int{}, nil
+}
+
+func (r *MemoryProcurementRepository) GetCostAllocationWarningByPO(poID int) (*models.POAllocationWarning, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return &models.POAllocationWarning{HasAllocation: false, AllocatedLotCount: 0, TotalAllocatedAmount: 0}, nil
+}
+
 func (r *MemoryProcurementRepository) GetContainersByBLID(blID int) ([]models.Container, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

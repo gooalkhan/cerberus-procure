@@ -155,7 +155,7 @@ const CostAllocationDetail: React.FC<CostAllocationDetailProps> = ({ costAllocat
     setImportLoading(true);
     try {
       const lotIds = items.map(i => i.lot_id);
-      const fetchedProposals = await procureApi.calculateCostAllocation(lotIds, costAllocation.is_late_cost_allocation || false);
+      const fetchedProposals = await procureApi.calculateCostAllocation(lotIds);
       setProposals(fetchedProposals);
       mergeProposals(fetchedProposals);
     } catch (err: any) {

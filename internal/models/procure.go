@@ -268,6 +268,13 @@ type CostAllocationItemProposal struct {
 	AllocatedAmount float64 `json:"allocated_amount"`
 }
 
+// POAllocationWarning PO 변경 시 기존 Cost Allocation 영향 경고
+type POAllocationWarning struct {
+	HasAllocation      bool    `json:"has_allocation"`
+	AllocatedLotCount  int     `json:"allocated_lot_count"`
+	TotalAllocatedAmount float64 `json:"total_allocated_amount"`
+}
+
 // BookingView 물류 선적 조회를 위한 통합 뷰 모델
 type BookingView struct {
 	ContainerItemID int       `json:"container_item_id"`

@@ -122,6 +122,10 @@ func (uc *ProcurementUseCase) DeletePOItem(id int) error {
 	return uc.repo.DeletePOItem(id)
 }
 
+func (uc *ProcurementUseCase) GetCostAllocationWarningByPO(poID int) (*models.POAllocationWarning, error) {
+	return uc.repo.GetCostAllocationWarningByPO(poID)
+}
+
 // Commercial Invoice
 func (uc *ProcurementUseCase) GetCommercialInvoices() ([]models.CommercialInvoice, error) {
 	return uc.repo.GetCommercialInvoices()
@@ -220,13 +224,23 @@ func (uc *ProcurementUseCase) GetCostAllocationLotCandidatesByIDs(ids []int) ([]
 	return uc.repo.GetCostAllocationLotCandidatesByIDs(ids)
 }
 
-func (uc *ProcurementUseCase) CalculateCostAllocation(lotIDs []int, late bool) ([]models.CostAllocationProposal, error) {
+func (uc *ProcurementUseCase) CalculateCostAllocation(lotIDs []int) ([]models.CostAllocationProposal, error) {
 	selectedCandidates, err := uc.repo.GetCostAllocationLotCandidatesByIDs(lotIDs)
 	if err != nil {
 		return nil, err
 	}
 	if len(selectedCandidates) == 0 {
 		return []models.CostAllocationProposal{}, nil
+	}
+
+	// Fetch all candidates to build a base map for already allocated lots
+	allCandidates, err := uc.repo.GetAllCostAllocationLotCandidates()
+	if err != nil {
+		return nil, err
+	}
+	lotCandidateMap := make(map[int]models.CostAllocationLotCandidate)
+	for _, c := range allCandidates {
+		lotCandidateMap[c.LotID] = c
 	}
 
 	// Collect reference UUIDs from selected lots
@@ -265,21 +279,11 @@ func (uc *ProcurementUseCase) CalculateCostAllocation(lotIDs []int, late bool) (
 		return nil, err
 	}
 
-	// In late cost allocation, exclude APs already used for the selected lots
-	var usedAPIDs map[int]bool
-	if late {
-		usedAPIDs, _ = uc.repo.GetAPIDsUsedForLots(lotIDs)
-	}
-
 	var matchedAPs []models.AccountPayable
 	for _, ap := range aps {
-		if !refUUIDs[ap.ReferenceUUID] || ap.AllocationStatus == "Closed" {
-			continue
+		if refUUIDs[ap.ReferenceUUID] && ap.AllocationStatus != "Closed" {
+			matchedAPs = append(matchedAPs, ap)
 		}
-		if late && usedAPIDs[ap.ID] {
-			continue
-		}
-		matchedAPs = append(matchedAPs, ap)
 	}
 
 	// Helper to compute base value for a candidate based on allocation type
@@ -409,43 +413,40 @@ func (uc *ProcurementUseCase) CalculateCostAllocation(lotIDs []int, late bool) (
 			totalRefBase += computeBaseFromUnit(u, ap.AllocationType)
 		}
 
-		// Compute selected lots' base within the referenced entity
-		var selectedRefBase float64
-		selectedBaseValues := make(map[int]float64)
-		for _, c := range selectedCandidates {
-			if matchesReference(c, ap.ReferenceUUID, ap.ReferenceType) {
-				base := computeBase(c, ap.AllocationType)
-				selectedBaseValues[c.LotID] = base
-				selectedRefBase += base
+		// Compute already allocated amount and base for this AP
+		alreadyAllocated, allocatedLotIDs, err := uc.repo.GetCostAllocationSummaryByAP(ap.ID)
+		if err != nil {
+			continue
+		}
+		var allocatedBase float64
+		for _, lotID := range allocatedLotIDs {
+			if c, ok := lotCandidateMap[lotID]; ok && matchesReference(c, ap.ReferenceUUID, ap.ReferenceType) {
+				allocatedBase += computeBase(c, ap.AllocationType)
 			}
 		}
 
-		if totalRefBase == 0 || selectedRefBase == 0 {
+		// Remaining AP amount and remaining reference base after excluding already allocated portions
+		remainingAP := ap.LocalAmount - alreadyAllocated
+		remainingBase := totalRefBase - allocatedBase
+
+		if remainingAP <= 0 || remainingBase <= 0 {
 			continue
 		}
 
-		// Prorate AP amount to the selected portion
-		proratedAmount := ap.LocalAmount * selectedRefBase / totalRefBase
-
-		// Distribute prorated amount among selected lots proportionally
-		distributed := 0.0
+		// Distribute remaining AP amount to selected lots proportionally based on remaining base
 		for _, c := range selectedCandidates {
-			base := selectedBaseValues[c.LotID]
+			if !matchesReference(c, ap.ReferenceUUID, ap.ReferenceType) {
+				continue
+			}
+			base := computeBase(c, ap.AllocationType)
 			if base == 0 {
 				continue
 			}
-			amount := proratedAmount * base / selectedRefBase
-			distributed += amount
+			amount := remainingAP * base / remainingBase
 			proposal.Proposals = append(proposal.Proposals, models.CostAllocationItemProposal{
 				LotID:           c.LotID,
 				AllocatedAmount: amount,
 			})
-		}
-
-		// Adjust rounding on the last item
-		if len(proposal.Proposals) > 0 {
-			last := &proposal.Proposals[len(proposal.Proposals)-1]
-			last.AllocatedAmount += proratedAmount - distributed
 		}
 
 		proposals = append(proposals, proposal)

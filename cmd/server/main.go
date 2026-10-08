@@ -365,6 +365,24 @@ func posHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func poAllocationWarningHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	poIDStr := r.URL.Query().Get("poId")
+	var poID int
+	fmt.Sscanf(poIDStr, "%d", &poID)
+	warning, err := procureUC.GetCostAllocationWarningByPO(poID)
+	if err != nil {
+		if serverLogger != nil { serverLogger.Printf("PO Allocation Warning Error: %v", err) }
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	json.NewEncoder(w).Encode(warning)
+}
+
 func poItemsHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if r.Method == http.MethodGet {
@@ -627,16 +645,13 @@ func costAllocationLotCandidatesHandler(w http.ResponseWriter, r *http.Request) 
 func calculateCostAllocationHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if r.Method == http.MethodPost {
-		var req struct {
-			LotIDs []int `json:"lot_ids"`
-			Late   bool  `json:"late"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		var lotIDs []int
+		if err := json.NewDecoder(r.Body).Decode(&lotIDs); err != nil {
 			if serverLogger != nil { serverLogger.Printf("Calculate Cost Allocation Decode Error: %v", err) }
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		proposals, err := procureUC.CalculateCostAllocation(req.LotIDs, req.Late)
+		proposals, err := procureUC.CalculateCostAllocation(lotIDs)
 		if err != nil {
 			if serverLogger != nil { serverLogger.Printf("Calculate Cost Allocation Error: %v", err) }
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -839,6 +854,7 @@ func main() {
 	mux.HandleFunc("/api/items", corsMiddleware(authMiddleware(itemsHandler)))
 	mux.HandleFunc("/api/vendors", corsMiddleware(authMiddleware(vendorsHandler)))
 	mux.HandleFunc("/api/pos", corsMiddleware(authMiddleware(posHandler)))
+	mux.HandleFunc("/api/pos/allocation-warning", corsMiddleware(authMiddleware(poAllocationWarningHandler)))
 	mux.HandleFunc("/api/pos/items", corsMiddleware(authMiddleware(poItemsHandler)))
 	mux.HandleFunc("/api/invoices", corsMiddleware(authMiddleware(invoicesHandler)))
 	mux.HandleFunc("/api/invoices/items", corsMiddleware(authMiddleware(invoiceItemsHandler)))

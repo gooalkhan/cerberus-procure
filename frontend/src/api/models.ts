@@ -43,6 +43,12 @@ export interface POItem {
   remark: string;
 }
 
+export interface POAllocationWarning {
+  has_allocation: boolean;
+  allocated_lot_count: number;
+  total_allocated_amount: number;
+}
+
 export interface CommercialInvoice {
   ci_id: number;
   ci_no: string;

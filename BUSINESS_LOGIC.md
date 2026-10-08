@@ -29,6 +29,40 @@
 *   **상세 귀속(Cost_Allocation_Item)**: 배분 이벤트의 결과로 각 로트에 귀속된 금액은 상세 테이블에 기록되어, 특정 로트의 원가가 어떤 청구서들로부터 구성되었는지 완벽한 Audit Trail을 제공합니다.
 *   **비용 상속 및 마감**: 선적 전 발생 비용은 입고 시점에 로트로 자동 상속됩니다. 인코텀즈별 필수 비용이 모두 입력되어야 원가 확정(Lock)이 가능하며, 확정된 단가는 `Inventory_Lot.Landed_Cost_Per_Unit`에 스냅샷으로 기록됩니다.
 
+### 일반 배분 vs 추후 배분 (Normal vs Late Cost Allocation)
+*   **일반 배분 (Normal Cost Allocation)**: 한 로트(Lot)는 기본적으로 한 번만 배분 대상이 될 수 있습니다. 배분 이력이 없는 로트만 선택 가능하며, 선택된 로트들에 대해 AP 금액을 일괄 배분합니다.
+*   **추후 배분 (Late Cost Allocation)**: 이미 배분 이력이 있는 로트도 추가로 선택할 수 있습니다. 예를 들어 선적 후 발생한 추가 비용(관세 추징금, 창고 보관료 등)을 기존에 배분 완료한 로트에 다시 귀속해야 할 때 사용합니다. 추후 배분에서는 이미 배분된 AP 잔액을 기준으로만 추가 배분이 이루어집니다.
+
+### 배분 금액 산출 로직 (Allocation Amount Calculation)
+선택된 로트들에 대한 AP 배분 금액은 다음 공식으로 산출됩니다.
+
+```
+remainingAP = AP.Local_Amount - alreadyAllocated
+remainingBase = totalRefBase - allocatedBase
+Lot 금액 = remainingAP * LotBase / remainingBase
+```
+
+*   `AP.Local_Amount`: 배분 대상 AP의 현지 통화 금액
+*   `alreadyAllocated`: 해당 AP가 이미 Cost_Allocation_Item에서 사용된 금액 합계
+*   `totalRefBase`: AP가 참조하는 문서(PO, CI, BL, Container, Container_Item, GR, Lot)의 전체 기준량(Quantity, Weight, Volume, Value, Unit)
+*   `allocatedBase`: 이미 배분된 로트들의 기준량 합계
+*   `LotBase`: 분배 대상 로트의 기준량
+
+이 로직은 다음을 보장합니다.
+
+1. **이미 배분된 금액은 고정**: `alreadyAllocated`를 먼저 제외하므로, 기존 배분 금액은 재계산되지 않고 보호됩니다.
+2. **미선적/미입고 항목 제외**: `totalRefBase`에는 아직 선택되지 않았거나 미입고(unlanded)인 품목의 기준량도 포함되므로, 해당 품목의 몫만큼 자동으로 제외됩니다.
+3. **PO 변경 시 비율 재적용**: PO 수량이나 단가가 변경되면 `totalRefBase`가 달라지므로, 새로운 배분 계산에서는 변경된 비율을 기준으로 남은 금액을 분배합니다. 다만 기존에 배분된 금액 자체는 고정되어 있으므로, 기존 배분과 새 배분의 합계가 AP 금액과 정확히 일치하지 않을 수 있습니다.
+
+### PO 변경 시 경고 (PO Modification Guardrail)
+PO의 품목(PO_Item)을 수정하거나 삭제하면 해당 PO에 연결된 로트의 기준량 비율이 변경될 수 있으므로, 기존 Cost Allocation의 비율이 물리적으로 틀어질 위험이 있습니다. 따라서 이미 Cost Allocation에 사용된 PO를 수정할 때는 시스템이 다음 정보를 포함한 경고를 표시합니다.
+
+*   배분 이력이 있는 로트 수
+*   해당 PO를 통해 배분된 총 금액
+*   "기존 배분 비율에 영향을 줄 수 있으므로 주의해서 진행" 안내
+
+해당 경고는 저장을 차단하지 않고 사용자의 확인(Confirm)을 요구합니다. 사용자는 변경의 영향을 인지한 상태에서 PO를 수정할 수 있습니다.
+
 ## 3. 수입 현금흐름 및 채무 관리 (Cash Flow)
 
 다양한 출처의 비용을 단일 채무 창구(`Account_Payable`)로 집결시켜 통합 관리합니다.

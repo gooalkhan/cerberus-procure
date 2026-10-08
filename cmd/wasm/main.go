@@ -334,6 +334,18 @@ func main() {
 			return nil
 		}))
 	}))
+	procureObj.Set("getPOAllocationWarning", js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		poId := args[0].Int()
+		return js.Global().Get("Promise").New(js.FuncOf(func(this js.Value, pArgs []js.Value) interface{} {
+			resolve := pArgs[0]
+			go func() {
+				warning, _ := procureUC.GetCostAllocationWarningByPO(poId)
+				b, _ := json.Marshal(warning)
+				resolve.Invoke(string(b))
+			}()
+			return nil
+		}))
+	}))
 
 	// Containers
 	procureObj.Set("getContainers", js.FuncOf(func(this js.Value, args []js.Value) interface{} {
@@ -570,12 +582,9 @@ func main() {
 		return js.Global().Get("Promise").New(js.FuncOf(func(this js.Value, pArgs []js.Value) interface{} {
 			resolve := pArgs[0]
 			go func() {
-				var req struct {
-					LotIDs []int `json:"lot_ids"`
-					Late   bool  `json:"late"`
-				}
-				json.Unmarshal([]byte(jsonStr), &req)
-				proposals, _ := procureUC.CalculateCostAllocation(req.LotIDs, req.Late)
+				var lotIDs []int
+				json.Unmarshal([]byte(jsonStr), &lotIDs)
+				proposals, _ := procureUC.CalculateCostAllocation(lotIDs)
 				b, _ := json.Marshal(proposals)
 				resolve.Invoke(string(b))
 			}()

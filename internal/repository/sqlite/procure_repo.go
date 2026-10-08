@@ -1278,6 +1278,53 @@ func (r *SQLiteProcurementRepository) GetAPIDsUsedForLots(lotIDs []int) (map[int
 	return ids, nil
 }
 
+func (r *SQLiteProcurementRepository) GetCostAllocationSummaryByAP(apID int) (float64, []int, error) {
+	rows, err := r.db.Query("SELECT Lot_ID, IFNULL(Allocated_Amount, 0) FROM Cost_Allocation_Item WHERE AP_ID = ?", apID)
+	if err != nil {
+		return 0, nil, err
+	}
+	defer rows.Close()
+
+	var total float64
+	lotIDMap := make(map[int]bool)
+	for rows.Next() {
+		var lotID int
+		var amount float64
+		if err := rows.Scan(&lotID, &amount); err != nil {
+			return 0, nil, err
+		}
+		total += amount
+		lotIDMap[lotID] = true
+	}
+
+	lotIDs := make([]int, 0, len(lotIDMap))
+	for id := range lotIDMap {
+		lotIDs = append(lotIDs, id)
+	}
+	return total, lotIDs, nil
+}
+
+func (r *SQLiteProcurementRepository) GetCostAllocationWarningByPO(poID int) (*models.POAllocationWarning, error) {
+	query := `
+		SELECT COUNT(DISTINCT cai.Lot_ID), IFNULL(SUM(cai.Allocated_Amount), 0)
+		FROM Cost_Allocation_Item cai
+		JOIN Inventory_Lot l ON cai.Lot_ID = l.Lot_ID
+		JOIN Container_Item ci ON l.Container_Item_ID = ci.Container_Item_ID
+		JOIN PO_Item pi ON ci.PO_Item_ID = pi.PO_Item_ID
+		WHERE pi.PO_ID = ?
+	`
+	var lotCount int
+	var totalAmount float64
+	if err := r.db.QueryRow(query, poID).Scan(&lotCount, &totalAmount); err != nil {
+		return nil, err
+	}
+	return &models.POAllocationWarning{
+		HasAllocation:        lotCount > 0,
+		AllocatedLotCount:    lotCount,
+		TotalAllocatedAmount: totalAmount,
+	}, nil
+}
+
 func (r *SQLiteProcurementRepository) GetCostAllocationReferenceBaseUnits(refType string, refID int) ([]models.CostAllocationBaseUnit, error) {
 	var query string
 	switch refType {
