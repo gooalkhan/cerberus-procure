@@ -192,14 +192,16 @@ type InventoryLot struct {
 
 // CostAllocation 랜딩 코스트 배분 헤더
 type CostAllocation struct {
-	ID                   int       `json:"cost_allocation_id"`
-	AllocationDate       time.Time `json:"allocation_date"`
-	TotalAllocatedAmount float64   `json:"total_allocated_amount"`
-	Remark               string    `json:"remark"`
-	CreatedBy            string    `json:"created_by"`
-	CreatedAt            time.Time `json:"created_at"`
-	UpdatedBy            string    `json:"updated_by"`
-	UpdatedAt            time.Time `json:"updated_at"`
+	ID                   int                  `json:"cost_allocation_id"`
+	AllocationDate       time.Time            `json:"allocation_date"`
+	TotalAllocatedAmount float64              `json:"total_allocated_amount"`
+	IsLateCostAllocation bool                 `json:"is_late_cost_allocation"`
+	Remark               string               `json:"remark"`
+	CreatedBy            string               `json:"created_by"`
+	CreatedAt            time.Time            `json:"created_at"`
+	UpdatedBy            string               `json:"updated_by"`
+	UpdatedAt            time.Time            `json:"updated_at"`
+	Items                []CostAllocationItem `json:"items,omitempty"`
 }
 
 // CostAllocationItem 랜딩 코스트 배분 상세
@@ -209,6 +211,61 @@ type CostAllocationItem struct {
 	LotID            int     `json:"lot_id"`
 	AllocatedAmount  float64 `json:"allocated_amount"`
 	APID             int     `json:"ap_id"`
+}
+
+// CostAllocationBaseUnit 배분 기준량 단위
+type CostAllocationBaseUnit struct {
+	Qty         float64
+	UnitPrice   float64
+	GrossWeight float64
+	CBM         float64
+}
+
+// CostAllocationLotCandidate 배분 대상 로트 후보
+type CostAllocationLotCandidate struct {
+	LotID           int     `json:"lot_id"`
+	LotNo           string  `json:"lot_no"`
+	LotUUID         string  `json:"lot_uuid"`
+	GRID            int     `json:"gr_id"`
+	GRUUID          string  `json:"gr_uuid"`
+	ContainerItemID int     `json:"container_item_id"`
+	ContainerItemUUID string `json:"container_item_uuid"`
+	CIID            int     `json:"ci_id"`
+	CIUUID          string  `json:"ci_uuid"`
+	ContainerID     int     `json:"container_id"`
+	ContainerUUID   string  `json:"container_uuid"`
+	ContainerNo     string  `json:"container_no"`
+	BLID            int     `json:"bl_id"`
+	BLUUID          string  `json:"bl_uuid"`
+	BLNo            string  `json:"bl_no"`
+	POID            int     `json:"po_id"`
+	POUUID          string  `json:"po_uuid"`
+	PONo            string  `json:"po_no"`
+	ItemID          int     `json:"item_id"`
+	ItemName        string  `json:"item_name"`
+	Qty             float64 `json:"qty"`
+	GrossWeight     float64 `json:"gross_weight"`
+	NetWeight       float64 `json:"net_weight"`
+	CBM             float64 `json:"cbm"`
+	UnitPrice       float64 `json:"unit_price"`
+	Currency        string  `json:"currency"`
+}
+
+// CostAllocationProposal AP 배분 제안
+type CostAllocationProposal struct {
+	APID            int     `json:"ap_id"`
+	APNo            string  `json:"ap_no"`
+	Amount          float64 `json:"amount"`
+	LocalAmount     float64 `json:"local_amount"`
+	Currency        string  `json:"currency"`
+	AllocationType  string  `json:"allocation_type"`
+	Proposals       []CostAllocationItemProposal `json:"proposals"`
+}
+
+// CostAllocationItemProposal 개별 로트별 배분 제안
+type CostAllocationItemProposal struct {
+	LotID           int     `json:"lot_id"`
+	AllocatedAmount float64 `json:"allocated_amount"`
 }
 
 // BookingView 물류 선적 조회를 위한 통합 뷰 모델

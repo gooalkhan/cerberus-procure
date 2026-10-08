@@ -74,6 +74,13 @@ type ProcurementRepository interface {
 	GetCostAllocationItemsByAllocationID(caID int) ([]models.CostAllocationItem, error)
 	SaveCostAllocationItem(item *models.CostAllocationItem) error
 
+	// Cost Allocation Helpers
+	GetAvailableCostAllocationLots() ([]models.CostAllocationLotCandidate, error)
+	GetCostAllocationLotCandidatesByIDs(ids []int) ([]models.CostAllocationLotCandidate, error)
+	GetAllCostAllocationLotCandidates() ([]models.CostAllocationLotCandidate, error)
+	GetCostAllocationReferenceBaseUnits(refType string, refID int) ([]models.CostAllocationBaseUnit, error)
+	GetAPIDsUsedForLots(lotIDs []int) (map[int]bool, error)
+
 	// Unified Views
 	GetBookings() ([]models.BookingView, error)
 

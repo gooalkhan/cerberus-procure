@@ -584,6 +584,68 @@ func allocationsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func costAllocationItemsHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method == http.MethodGet {
+		caIDStr := r.URL.Query().Get("costAllocationId")
+		caID := 0
+		fmt.Sscanf(caIDStr, "%d", &caID)
+		list, _ := procureUC.GetCostAllocationItemsByAllocationID(caID)
+		json.NewEncoder(w).Encode(list)
+	}
+}
+
+func availableCostAllocationLotsHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method == http.MethodGet {
+		lateStr := r.URL.Query().Get("late")
+		late := lateStr == "true" || lateStr == "1"
+		list, _ := procureUC.GetAvailableCostAllocationLots(late)
+		json.NewEncoder(w).Encode(list)
+	}
+}
+
+func costAllocationLotCandidatesHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method == http.MethodPost {
+		var lotIDs []int
+		if err := json.NewDecoder(r.Body).Decode(&lotIDs); err != nil {
+			if serverLogger != nil { serverLogger.Printf("Cost Allocation Lot Candidates Decode Error: %v", err) }
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		list, err := procureUC.GetCostAllocationLotCandidatesByIDs(lotIDs)
+		if err != nil {
+			if serverLogger != nil { serverLogger.Printf("Cost Allocation Lot Candidates Error: %v", err) }
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(list)
+	}
+}
+
+func calculateCostAllocationHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method == http.MethodPost {
+		var req struct {
+			LotIDs []int `json:"lot_ids"`
+			Late   bool  `json:"late"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			if serverLogger != nil { serverLogger.Printf("Calculate Cost Allocation Decode Error: %v", err) }
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		proposals, err := procureUC.CalculateCostAllocation(req.LotIDs, req.Late)
+		if err != nil {
+			if serverLogger != nil { serverLogger.Printf("Calculate Cost Allocation Error: %v", err) }
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(proposals)
+	}
+}
+
 func bookingsHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if r.Method == http.MethodGet {
@@ -789,6 +851,10 @@ func main() {
 	mux.HandleFunc("/api/lots", corsMiddleware(authMiddleware(lotsHandler)))
 	mux.HandleFunc("/api/lots/gr", corsMiddleware(authMiddleware(lotsByGRHandler)))
 	mux.HandleFunc("/api/allocations", corsMiddleware(authMiddleware(allocationsHandler)))
+	mux.HandleFunc("/api/allocations/items", corsMiddleware(authMiddleware(costAllocationItemsHandler)))
+	mux.HandleFunc("/api/allocations/available-lots", corsMiddleware(authMiddleware(availableCostAllocationLotsHandler)))
+	mux.HandleFunc("/api/allocations/lot-candidates", corsMiddleware(authMiddleware(costAllocationLotCandidatesHandler)))
+	mux.HandleFunc("/api/allocations/calculate", corsMiddleware(authMiddleware(calculateCostAllocationHandler)))
 	mux.HandleFunc("/api/bookings", corsMiddleware(authMiddleware(bookingsHandler)))
 	mux.HandleFunc("/api/bookings/template", corsMiddleware(authMiddleware(bookingTemplateHandler)))
 	mux.HandleFunc("/api/bookings/bulk-import", corsMiddleware(authMiddleware(bookingBulkImportHandler)))

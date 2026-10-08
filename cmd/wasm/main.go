@@ -521,6 +521,68 @@ func main() {
 		}))
 	}))
 
+	procureObj.Set("getCostAllocationItems", js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		caID := args[0].Int()
+		return js.Global().Get("Promise").New(js.FuncOf(func(this js.Value, pArgs []js.Value) interface{} {
+			resolve := pArgs[0]
+			go func() {
+				list, _ := procureUC.GetCostAllocationItemsByAllocationID(caID)
+				b, _ := json.Marshal(list)
+				resolve.Invoke(string(b))
+			}()
+			return nil
+		}))
+	}))
+
+	procureObj.Set("getAvailableCostAllocationLots", js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		late := false
+		if len(args) > 0 {
+			late = args[0].Bool()
+		}
+		return js.Global().Get("Promise").New(js.FuncOf(func(this js.Value, pArgs []js.Value) interface{} {
+			resolve := pArgs[0]
+			go func() {
+				list, _ := procureUC.GetAvailableCostAllocationLots(late)
+				b, _ := json.Marshal(list)
+				resolve.Invoke(string(b))
+			}()
+			return nil
+		}))
+	}))
+
+	procureObj.Set("getCostAllocationLotCandidatesByIDs", js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		jsonStr := args[0].String()
+		return js.Global().Get("Promise").New(js.FuncOf(func(this js.Value, pArgs []js.Value) interface{} {
+			resolve := pArgs[0]
+			go func() {
+				var lotIDs []int
+				json.Unmarshal([]byte(jsonStr), &lotIDs)
+				list, _ := procureUC.GetCostAllocationLotCandidatesByIDs(lotIDs)
+				b, _ := json.Marshal(list)
+				resolve.Invoke(string(b))
+			}()
+			return nil
+		}))
+	}))
+
+	procureObj.Set("calculateCostAllocation", js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		jsonStr := args[0].String()
+		return js.Global().Get("Promise").New(js.FuncOf(func(this js.Value, pArgs []js.Value) interface{} {
+			resolve := pArgs[0]
+			go func() {
+				var req struct {
+					LotIDs []int `json:"lot_ids"`
+					Late   bool  `json:"late"`
+				}
+				json.Unmarshal([]byte(jsonStr), &req)
+				proposals, _ := procureUC.CalculateCostAllocation(req.LotIDs, req.Late)
+				b, _ := json.Marshal(proposals)
+				resolve.Invoke(string(b))
+			}()
+			return nil
+		}))
+	}))
+
 	procureObj.Set("getBookings", js.FuncOf(func(this js.Value, args []js.Value) interface{} {
 		return js.Global().Get("Promise").New(js.FuncOf(func(this js.Value, pArgs []js.Value) interface{} {
 			resolve := pArgs[0]

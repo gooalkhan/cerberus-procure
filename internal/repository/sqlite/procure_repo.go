@@ -4,6 +4,7 @@ import (
 	"cerberus-procure/internal/models"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -47,7 +48,7 @@ func migrateProcurement(db *sql.DB) error {
 		`CREATE TABLE IF NOT EXISTS Vendor_Master (
 			Vendor_ID INTEGER PRIMARY KEY AUTOINCREMENT,
 			Name TEXT NOT NULL,
-			Category TEXT CHECK (Category IN ('Supplier', 'Forwarder', 'Customs_Broker', 'Etc')),
+			Category TEXT,
 			Business_Reg_No TEXT,
 			Bank_Account TEXT,
 			Remark TEXT,
@@ -193,6 +194,7 @@ func migrateProcurement(db *sql.DB) error {
 			Cost_Allocation_ID INTEGER PRIMARY KEY AUTOINCREMENT,
 			Allocation_date DATETIME NOT NULL,
 			Total_Allocated_Amount REAL NOT NULL,
+			Is_Late_Cost_Allocation INTEGER DEFAULT 0,
 			Remark TEXT,
 			Created_By TEXT,
 			Created_At DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -204,7 +206,7 @@ func migrateProcurement(db *sql.DB) error {
 			Cost_Allocation_ID INTEGER NOT NULL,
 			Lot_ID INTEGER NOT NULL,
 			Allocated_Amount REAL NOT NULL,
-			AP_ID INTEGER NOT NULL,
+			AP_ID INTEGER,
 			FOREIGN KEY (Cost_Allocation_ID) REFERENCES Cost_Allocation(Cost_Allocation_ID),
 			FOREIGN KEY (Lot_ID) REFERENCES Inventory_Lot(Lot_ID),
 			FOREIGN KEY (AP_ID) REFERENCES Account_Payable(AP_ID)
@@ -413,6 +415,84 @@ func migrateLegacySchemas(db *sql.DB) error {
 		err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('Container_Item') WHERE name = ?`, col).Scan(&has)
 		if err == nil && has == 1 {
 			_, _ = db.Exec(fmt.Sprintf(`ALTER TABLE Container_Item DROP COLUMN %s`, col))
+		}
+	}
+
+	// Remove CHECK constraint from Vendor_Master.Category by recreating the table
+	_ = migrateVendorMasterCategoryConstraint(db)
+
+	// Make Cost_Allocation_Item.AP_ID nullable
+	_ = migrateCostAllocationItemAPIDNullable(db)
+
+	// Add Is_Late_Cost_Allocation to Cost_Allocation if missing
+	var hasLateCol int
+	err = db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('Cost_Allocation') WHERE name = 'Is_Late_Cost_Allocation'`).Scan(&hasLateCol)
+	if err == nil && hasLateCol == 0 {
+		_, _ = db.Exec(`ALTER TABLE Cost_Allocation ADD COLUMN Is_Late_Cost_Allocation INTEGER DEFAULT 0`)
+	}
+
+	return nil
+}
+
+func migrateVendorMasterCategoryConstraint(db *sql.DB) error {
+	var constraintCount int
+	err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='Vendor_Master' AND sql LIKE '%CHECK%Category%'`).Scan(&constraintCount)
+	if err != nil || constraintCount == 0 {
+		return nil
+	}
+
+	queries := []string{
+		`ALTER TABLE Vendor_Master RENAME TO Vendor_Master_old`,
+		`CREATE TABLE Vendor_Master (
+			Vendor_ID INTEGER PRIMARY KEY AUTOINCREMENT,
+			Name TEXT NOT NULL,
+			Category TEXT,
+			Business_Reg_No TEXT,
+			Bank_Account TEXT,
+			Remark TEXT,
+			Created_By TEXT,
+			Created_At DATETIME DEFAULT CURRENT_TIMESTAMP,
+			Updated_By TEXT,
+			Updated_At DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`INSERT INTO Vendor_Master (Vendor_ID, Name, Category, Business_Reg_No, Bank_Account, Remark, Created_By, Created_At, Updated_By, Updated_At)
+		 SELECT Vendor_ID, Name, Category, Business_Reg_No, Bank_Account, Remark, Created_By, Created_At, Updated_By, Updated_At FROM Vendor_Master_old`,
+		`DROP TABLE Vendor_Master_old`,
+	}
+	for _, q := range queries {
+		if _, err := db.Exec(q); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func migrateCostAllocationItemAPIDNullable(db *sql.DB) error {
+	var notNull int
+	err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('Cost_Allocation_Item') WHERE name = 'AP_ID' AND "notnull" = 1`).Scan(&notNull)
+	if err != nil || notNull == 0 {
+		return nil
+	}
+
+	queries := []string{
+		`ALTER TABLE Cost_Allocation_Item RENAME TO Cost_Allocation_Item_old`,
+		`CREATE TABLE Cost_Allocation_Item (
+			Cost_Allocation_Item_ID INTEGER PRIMARY KEY AUTOINCREMENT,
+			Cost_Allocation_ID INTEGER NOT NULL,
+			Lot_ID INTEGER NOT NULL,
+			Allocated_Amount REAL NOT NULL,
+			AP_ID INTEGER,
+			FOREIGN KEY (Cost_Allocation_ID) REFERENCES Cost_Allocation(Cost_Allocation_ID),
+			FOREIGN KEY (Lot_ID) REFERENCES Inventory_Lot(Lot_ID),
+			FOREIGN KEY (AP_ID) REFERENCES Account_Payable(AP_ID)
+		)`,
+		`INSERT INTO Cost_Allocation_Item (Cost_Allocation_Item_ID, Cost_Allocation_ID, Lot_ID, Allocated_Amount, AP_ID)
+		 SELECT Cost_Allocation_Item_ID, Cost_Allocation_ID, Lot_ID, Allocated_Amount, CASE WHEN AP_ID = 0 THEN NULL ELSE AP_ID END FROM Cost_Allocation_Item_old`,
+		`DROP TABLE Cost_Allocation_Item_old`,
+	}
+	for _, q := range queries {
+		if _, err := db.Exec(q); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -857,7 +937,7 @@ func (r *SQLiteProcurementRepository) SaveInventoryLot(i *models.InventoryLot) e
 
 // Cost Allocation
 func (r *SQLiteProcurementRepository) GetCostAllocations() ([]models.CostAllocation, error) {
-	rows, err := r.db.Query("SELECT Cost_Allocation_ID, Allocation_date, IFNULL(Total_Allocated_Amount, 0), IFNULL(Remark, ''), IFNULL(Created_By, ''), Created_At, IFNULL(Updated_By, ''), Updated_At FROM Cost_Allocation")
+	rows, err := r.db.Query("SELECT Cost_Allocation_ID, Allocation_date, IFNULL(Total_Allocated_Amount, 0), IFNULL(Is_Late_Cost_Allocation, 0), IFNULL(Remark, ''), IFNULL(Created_By, ''), Created_At, IFNULL(Updated_By, ''), Updated_At FROM Cost_Allocation")
 	if err != nil {
 		return nil, err
 	}
@@ -865,16 +945,22 @@ func (r *SQLiteProcurementRepository) GetCostAllocations() ([]models.CostAllocat
 	list := []models.CostAllocation{}
 	for rows.Next() {
 		var i models.CostAllocation
-		rows.Scan(&i.ID, &i.AllocationDate, &i.TotalAllocatedAmount, &i.Remark, &i.CreatedBy, &i.CreatedAt, &i.UpdatedBy, &i.UpdatedAt)
+		var late int
+		rows.Scan(&i.ID, &i.AllocationDate, &i.TotalAllocatedAmount, &late, &i.Remark, &i.CreatedBy, &i.CreatedAt, &i.UpdatedBy, &i.UpdatedAt)
+		i.IsLateCostAllocation = late == 1
 		list = append(list, i)
 	}
 	return list, nil
 }
 
 func (r *SQLiteProcurementRepository) SaveCostAllocation(ca *models.CostAllocation) error {
+	late := 0
+	if ca.IsLateCostAllocation {
+		late = 1
+	}
 	if ca.ID == 0 {
-		res, err := r.db.Exec("INSERT INTO Cost_Allocation (Allocation_date, Total_Allocated_Amount, Remark, Created_By) VALUES (?, ?, ?, ?)",
-			ca.AllocationDate, ca.TotalAllocatedAmount, ca.Remark, ca.CreatedBy)
+		res, err := r.db.Exec("INSERT INTO Cost_Allocation (Allocation_date, Total_Allocated_Amount, Is_Late_Cost_Allocation, Remark, Created_By) VALUES (?, ?, ?, ?, ?)",
+			ca.AllocationDate, ca.TotalAllocatedAmount, late, ca.Remark, ca.CreatedBy)
 		if err != nil {
 			return err
 		}
@@ -882,8 +968,8 @@ func (r *SQLiteProcurementRepository) SaveCostAllocation(ca *models.CostAllocati
 		ca.ID = int(id)
 		return nil
 	}
-	_, err := r.db.Exec("UPDATE Cost_Allocation SET Allocation_date=?, Total_Allocated_Amount=?, Remark=?, Updated_By=?, Updated_At=CURRENT_TIMESTAMP WHERE Cost_Allocation_ID=?",
-		ca.AllocationDate, ca.TotalAllocatedAmount, ca.Remark, ca.UpdatedBy, ca.ID)
+	_, err := r.db.Exec("UPDATE Cost_Allocation SET Allocation_date=?, Total_Allocated_Amount=?, Is_Late_Cost_Allocation=?, Remark=?, Updated_By=?, Updated_At=CURRENT_TIMESTAMP WHERE Cost_Allocation_ID=?",
+		ca.AllocationDate, ca.TotalAllocatedAmount, late, ca.Remark, ca.UpdatedBy, ca.ID)
 	return err
 }
 
@@ -945,9 +1031,15 @@ func (r *SQLiteProcurementRepository) GetCostAllocationItemsByAllocationID(caID 
 }
 
 func (r *SQLiteProcurementRepository) SaveCostAllocationItem(i *models.CostAllocationItem) error {
+	var apID interface{}
+	if i.APID > 0 {
+		apID = i.APID
+	} else {
+		apID = nil
+	}
 	if i.ID == 0 {
 		res, err := r.db.Exec("INSERT INTO Cost_Allocation_Item (Cost_Allocation_ID, Lot_ID, Allocated_Amount, AP_ID) VALUES (?, ?, ?, ?)",
-			i.CostAllocationID, i.LotID, i.AllocatedAmount, i.APID)
+			i.CostAllocationID, i.LotID, i.AllocatedAmount, apID)
 		if err != nil {
 			return err
 		}
@@ -956,8 +1048,312 @@ func (r *SQLiteProcurementRepository) SaveCostAllocationItem(i *models.CostAlloc
 		return nil
 	}
 	_, err := r.db.Exec("UPDATE Cost_Allocation_Item SET Cost_Allocation_ID=?, Lot_ID=?, Allocated_Amount=?, AP_ID=? WHERE Cost_Allocation_Item_ID=?",
-		i.CostAllocationID, i.LotID, i.AllocatedAmount, i.APID, i.ID)
+		i.CostAllocationID, i.LotID, i.AllocatedAmount, apID, i.ID)
 	return err
+}
+
+func (r *SQLiteProcurementRepository) GetAvailableCostAllocationLots() ([]models.CostAllocationLotCandidate, error) {
+	query := `
+		SELECT 
+			l.Lot_ID,
+			IFNULL(l.Lot_No, ''),
+			IFNULL(l.UUID, ''),
+			IFNULL(l.GR_ID, 0),
+			IFNULL(gr.UUID, ''),
+			IFNULL(l.Container_Item_ID, 0),
+			IFNULL(ci.UUID, ''),
+			IFNULL(ci.CI_ID, 0),
+			IFNULL(ci_tbl.UUID, ''),
+			IFNULL(ci.Container_ID, 0),
+			IFNULL(c.UUID, ''),
+			IFNULL(c.Container_No, ''),
+			IFNULL(ci.BL_ID, 0),
+			IFNULL(b.UUID, ''),
+			IFNULL(b.BL_No, ''),
+			IFNULL(pi.PO_ID, 0),
+			IFNULL(p.UUID, ''),
+			IFNULL(p.PO_No, ''),
+			IFNULL(pi.Item_ID, 0),
+			IFNULL(im.Name, ''),
+			IFNULL(l.Qty, 0),
+			CASE WHEN IFNULL(ci.Load_Qty, 0) > 0 THEN IFNULL(ci.Gross_Weight, 0) * IFNULL(l.Qty, 0) / ci.Load_Qty ELSE 0 END,
+			CASE WHEN IFNULL(ci.Load_Qty, 0) > 0 THEN IFNULL(ci.Net_Weight, 0) * IFNULL(l.Qty, 0) / ci.Load_Qty ELSE 0 END,
+			CASE WHEN IFNULL(ci.Load_Qty, 0) > 0 THEN IFNULL(ci.Cbm, 0) * IFNULL(l.Qty, 0) / ci.Load_Qty ELSE 0 END,
+			IFNULL(pi.Unit_Price, 0),
+			IFNULL(p.Currency, '')
+		FROM Inventory_Lot l
+		JOIN Container_Item ci ON l.Container_Item_ID = ci.Container_Item_ID
+		JOIN PO_Item pi ON ci.PO_Item_ID = pi.PO_Item_ID
+		JOIN Purchase_Order p ON pi.PO_ID = p.PO_ID
+		LEFT JOIN Goods_Receipt gr ON l.GR_ID = gr.GR_ID
+		LEFT JOIN Commercial_Invoice ci_tbl ON ci.CI_ID = ci_tbl.CI_ID
+		LEFT JOIN Container c ON ci.Container_ID = c.Container_ID
+		LEFT JOIN BL b ON ci.BL_ID = b.BL_ID
+		LEFT JOIN Item_Master im ON pi.Item_ID = im.Item_ID
+		LEFT JOIN Cost_Allocation_Item cai ON l.Lot_ID = cai.Lot_ID
+		GROUP BY l.Lot_ID
+		HAVING COUNT(cai.Cost_Allocation_Item_ID) = 0
+		ORDER BY l.Lot_ID DESC
+	`
+	rows, err := r.db.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	list := []models.CostAllocationLotCandidate{}
+	for rows.Next() {
+		var c models.CostAllocationLotCandidate
+		err := rows.Scan(&c.LotID, &c.LotNo, &c.LotUUID, &c.GRID, &c.GRUUID, &c.ContainerItemID, &c.ContainerItemUUID,
+			&c.CIID, &c.CIUUID, &c.ContainerID, &c.ContainerUUID, &c.ContainerNo,
+			&c.BLID, &c.BLUUID, &c.BLNo, &c.POID, &c.POUUID, &c.PONo,
+			&c.ItemID, &c.ItemName, &c.Qty,
+			&c.GrossWeight, &c.NetWeight, &c.CBM, &c.UnitPrice, &c.Currency)
+		if err != nil {
+			return nil, err
+		}
+		list = append(list, c)
+	}
+	return list, nil
+}
+
+func (r *SQLiteProcurementRepository) GetCostAllocationLotCandidatesByIDs(ids []int) ([]models.CostAllocationLotCandidate, error) {
+	if len(ids) == 0 {
+		return []models.CostAllocationLotCandidate{}, nil
+	}
+	placeholders := make([]string, len(ids))
+	args := make([]interface{}, len(ids))
+	for i, id := range ids {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+	query := fmt.Sprintf(`
+		SELECT 
+			l.Lot_ID,
+			IFNULL(l.Lot_No, ''),
+			IFNULL(l.UUID, ''),
+			IFNULL(l.GR_ID, 0),
+			IFNULL(gr.UUID, ''),
+			IFNULL(l.Container_Item_ID, 0),
+			IFNULL(ci.UUID, ''),
+			IFNULL(ci.CI_ID, 0),
+			IFNULL(ci_tbl.UUID, ''),
+			IFNULL(ci.Container_ID, 0),
+			IFNULL(c.UUID, ''),
+			IFNULL(c.Container_No, ''),
+			IFNULL(ci.BL_ID, 0),
+			IFNULL(b.UUID, ''),
+			IFNULL(b.BL_No, ''),
+			IFNULL(pi.PO_ID, 0),
+			IFNULL(p.UUID, ''),
+			IFNULL(p.PO_No, ''),
+			IFNULL(pi.Item_ID, 0),
+			IFNULL(im.Name, ''),
+			IFNULL(l.Qty, 0),
+			CASE WHEN IFNULL(ci.Load_Qty, 0) > 0 THEN IFNULL(ci.Gross_Weight, 0) * IFNULL(l.Qty, 0) / ci.Load_Qty ELSE 0 END,
+			CASE WHEN IFNULL(ci.Load_Qty, 0) > 0 THEN IFNULL(ci.Net_Weight, 0) * IFNULL(l.Qty, 0) / ci.Load_Qty ELSE 0 END,
+			CASE WHEN IFNULL(ci.Load_Qty, 0) > 0 THEN IFNULL(ci.Cbm, 0) * IFNULL(l.Qty, 0) / ci.Load_Qty ELSE 0 END,
+			IFNULL(pi.Unit_Price, 0),
+			IFNULL(p.Currency, '')
+		FROM Inventory_Lot l
+		JOIN Container_Item ci ON l.Container_Item_ID = ci.Container_Item_ID
+		JOIN PO_Item pi ON ci.PO_Item_ID = pi.PO_Item_ID
+		JOIN Purchase_Order p ON pi.PO_ID = p.PO_ID
+		LEFT JOIN Goods_Receipt gr ON l.GR_ID = gr.GR_ID
+		LEFT JOIN Commercial_Invoice ci_tbl ON ci.CI_ID = ci_tbl.CI_ID
+		LEFT JOIN Container c ON ci.Container_ID = c.Container_ID
+		LEFT JOIN BL b ON ci.BL_ID = b.BL_ID
+		LEFT JOIN Item_Master im ON pi.Item_ID = im.Item_ID
+		WHERE l.Lot_ID IN (%s)
+	`, strings.Join(placeholders, ","))
+	rows, err := r.db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	list := []models.CostAllocationLotCandidate{}
+	for rows.Next() {
+		var c models.CostAllocationLotCandidate
+		err := rows.Scan(&c.LotID, &c.LotNo, &c.LotUUID, &c.GRID, &c.GRUUID, &c.ContainerItemID, &c.ContainerItemUUID,
+			&c.CIID, &c.CIUUID, &c.ContainerID, &c.ContainerUUID, &c.ContainerNo,
+			&c.BLID, &c.BLUUID, &c.BLNo, &c.POID, &c.POUUID, &c.PONo,
+			&c.ItemID, &c.ItemName, &c.Qty,
+			&c.GrossWeight, &c.NetWeight, &c.CBM, &c.UnitPrice, &c.Currency)
+		if err != nil {
+			return nil, err
+		}
+		list = append(list, c)
+	}
+	return list, nil
+}
+
+func (r *SQLiteProcurementRepository) GetAllCostAllocationLotCandidates() ([]models.CostAllocationLotCandidate, error) {
+	query := `
+		SELECT 
+			l.Lot_ID,
+			IFNULL(l.Lot_No, ''),
+			IFNULL(l.UUID, ''),
+			IFNULL(l.GR_ID, 0),
+			IFNULL(gr.UUID, ''),
+			IFNULL(l.Container_Item_ID, 0),
+			IFNULL(ci.UUID, ''),
+			IFNULL(ci.CI_ID, 0),
+			IFNULL(ci_tbl.UUID, ''),
+			IFNULL(ci.Container_ID, 0),
+			IFNULL(c.UUID, ''),
+			IFNULL(c.Container_No, ''),
+			IFNULL(ci.BL_ID, 0),
+			IFNULL(b.UUID, ''),
+			IFNULL(b.BL_No, ''),
+			IFNULL(pi.PO_ID, 0),
+			IFNULL(p.UUID, ''),
+			IFNULL(p.PO_No, ''),
+			IFNULL(pi.Item_ID, 0),
+			IFNULL(im.Name, ''),
+			IFNULL(l.Qty, 0),
+			CASE WHEN IFNULL(ci.Load_Qty, 0) > 0 THEN IFNULL(ci.Gross_Weight, 0) * IFNULL(l.Qty, 0) / ci.Load_Qty ELSE 0 END,
+			CASE WHEN IFNULL(ci.Load_Qty, 0) > 0 THEN IFNULL(ci.Net_Weight, 0) * IFNULL(l.Qty, 0) / ci.Load_Qty ELSE 0 END,
+			CASE WHEN IFNULL(ci.Load_Qty, 0) > 0 THEN IFNULL(ci.Cbm, 0) * IFNULL(l.Qty, 0) / ci.Load_Qty ELSE 0 END,
+			IFNULL(pi.Unit_Price, 0),
+			IFNULL(p.Currency, '')
+		FROM Inventory_Lot l
+		JOIN Container_Item ci ON l.Container_Item_ID = ci.Container_Item_ID
+		JOIN PO_Item pi ON ci.PO_Item_ID = pi.PO_Item_ID
+		JOIN Purchase_Order p ON pi.PO_ID = p.PO_ID
+		LEFT JOIN Goods_Receipt gr ON l.GR_ID = gr.GR_ID
+		LEFT JOIN Commercial_Invoice ci_tbl ON ci.CI_ID = ci_tbl.CI_ID
+		LEFT JOIN Container c ON ci.Container_ID = c.Container_ID
+		LEFT JOIN BL b ON ci.BL_ID = b.BL_ID
+		LEFT JOIN Item_Master im ON pi.Item_ID = im.Item_ID
+		ORDER BY l.Lot_ID DESC
+	`
+	rows, err := r.db.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	list := []models.CostAllocationLotCandidate{}
+	for rows.Next() {
+		var c models.CostAllocationLotCandidate
+		err := rows.Scan(&c.LotID, &c.LotNo, &c.LotUUID, &c.GRID, &c.GRUUID, &c.ContainerItemID, &c.ContainerItemUUID,
+			&c.CIID, &c.CIUUID, &c.ContainerID, &c.ContainerUUID, &c.ContainerNo,
+			&c.BLID, &c.BLUUID, &c.BLNo, &c.POID, &c.POUUID, &c.PONo,
+			&c.ItemID, &c.ItemName, &c.Qty,
+			&c.GrossWeight, &c.NetWeight, &c.CBM, &c.UnitPrice, &c.Currency)
+		if err != nil {
+			return nil, err
+		}
+		list = append(list, c)
+	}
+	return list, nil
+}
+
+func (r *SQLiteProcurementRepository) GetAPIDsUsedForLots(lotIDs []int) (map[int]bool, error) {
+	if len(lotIDs) == 0 {
+		return make(map[int]bool), nil
+	}
+	placeholders := make([]string, len(lotIDs))
+	args := make([]interface{}, len(lotIDs))
+	for i, id := range lotIDs {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+	query := fmt.Sprintf("SELECT DISTINCT AP_ID FROM Cost_Allocation_Item WHERE Lot_ID IN (%s) AND AP_ID IS NOT NULL AND AP_ID > 0", strings.Join(placeholders, ","))
+	rows, err := r.db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	ids := make(map[int]bool)
+	for rows.Next() {
+		var id int
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids[id] = true
+	}
+	return ids, nil
+}
+
+func (r *SQLiteProcurementRepository) GetCostAllocationReferenceBaseUnits(refType string, refID int) ([]models.CostAllocationBaseUnit, error) {
+	var query string
+	switch refType {
+	case "PO":
+		query = `
+			SELECT IFNULL(PO_Qty, 0), IFNULL(Unit_Price, 0), 0, 0
+			FROM PO_Item
+			WHERE PO_ID = ?
+		`
+	case "CI":
+		query = `
+			SELECT IFNULL(ci.Load_Qty, 0), IFNULL(pi.Unit_Price, 0), IFNULL(ci.Gross_Weight, 0), IFNULL(ci.Cbm, 0)
+			FROM Container_Item ci
+			JOIN PO_Item pi ON ci.PO_Item_ID = pi.PO_Item_ID
+			WHERE ci.CI_ID = ?
+		`
+	case "BL":
+		query = `
+			SELECT IFNULL(ci.Load_Qty, 0), IFNULL(pi.Unit_Price, 0), IFNULL(ci.Gross_Weight, 0), IFNULL(ci.Cbm, 0)
+			FROM Container_Item ci
+			JOIN PO_Item pi ON ci.PO_Item_ID = pi.PO_Item_ID
+			WHERE ci.BL_ID = ?
+		`
+	case "Container":
+		query = `
+			SELECT IFNULL(ci.Load_Qty, 0), IFNULL(pi.Unit_Price, 0), IFNULL(ci.Gross_Weight, 0), IFNULL(ci.Cbm, 0)
+			FROM Container_Item ci
+			JOIN PO_Item pi ON ci.PO_Item_ID = pi.PO_Item_ID
+			WHERE ci.Container_ID = ?
+		`
+	case "ContainerItem", "Container Item":
+		query = `
+			SELECT IFNULL(ci.Load_Qty, 0), IFNULL(pi.Unit_Price, 0), IFNULL(ci.Gross_Weight, 0), IFNULL(ci.Cbm, 0)
+			FROM Container_Item ci
+			JOIN PO_Item pi ON ci.PO_Item_ID = pi.PO_Item_ID
+			WHERE ci.Container_Item_ID = ?
+		`
+	case "GR":
+		query = `
+			SELECT IFNULL(l.Qty, 0), IFNULL(pi.Unit_Price, 0),
+				CASE WHEN IFNULL(ci.Load_Qty, 0) > 0 THEN IFNULL(ci.Gross_Weight, 0) * IFNULL(l.Qty, 0) / ci.Load_Qty ELSE 0 END,
+				CASE WHEN IFNULL(ci.Load_Qty, 0) > 0 THEN IFNULL(ci.Cbm, 0) * IFNULL(l.Qty, 0) / ci.Load_Qty ELSE 0 END
+			FROM Inventory_Lot l
+			JOIN Container_Item ci ON l.Container_Item_ID = ci.Container_Item_ID
+			JOIN PO_Item pi ON ci.PO_Item_ID = pi.PO_Item_ID
+			WHERE l.GR_ID = ?
+		`
+	case "Lot":
+		query = `
+			SELECT IFNULL(l.Qty, 0), IFNULL(pi.Unit_Price, 0),
+				CASE WHEN IFNULL(ci.Load_Qty, 0) > 0 THEN IFNULL(ci.Gross_Weight, 0) * IFNULL(l.Qty, 0) / ci.Load_Qty ELSE 0 END,
+				CASE WHEN IFNULL(ci.Load_Qty, 0) > 0 THEN IFNULL(ci.Cbm, 0) * IFNULL(l.Qty, 0) / ci.Load_Qty ELSE 0 END
+			FROM Inventory_Lot l
+			JOIN Container_Item ci ON l.Container_Item_ID = ci.Container_Item_ID
+			JOIN PO_Item pi ON ci.PO_Item_ID = pi.PO_Item_ID
+			WHERE l.Lot_ID = ?
+		`
+	default:
+		return []models.CostAllocationBaseUnit{}, nil
+	}
+
+	rows, err := r.db.Query(query, refID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	list := []models.CostAllocationBaseUnit{}
+	for rows.Next() {
+		var u models.CostAllocationBaseUnit
+		if err := rows.Scan(&u.Qty, &u.UnitPrice, &u.GrossWeight, &u.CBM); err != nil {
+			return nil, err
+		}
+		list = append(list, u)
+	}
+	return list, nil
 }
 
 func (r *SQLiteProcurementRepository) GetContainersByBLID(blID int) ([]models.Container, error) {
@@ -1536,7 +1932,10 @@ func (r *SQLiteProcurementRepository) DeleteRecord(tableName string, id int) err
 	case "Account_Payable":
 		query = "DELETE FROM Account_Payable WHERE AP_ID = ?"
 	case "Cost_Allocation":
+		_, _ = r.db.Exec("DELETE FROM Cost_Allocation_Item WHERE Cost_Allocation_ID = ?", id)
 		query = "DELETE FROM Cost_Allocation WHERE Cost_Allocation_ID = ?"
+	case "Cost_Allocation_Item":
+		query = "DELETE FROM Cost_Allocation_Item WHERE Cost_Allocation_Item_ID = ?"
 	case "AP_Target_Group":
 		query = "DELETE FROM AP_Target_Group WHERE Group_ID = ?"
 	default:

@@ -3,6 +3,13 @@ import { POItem, PurchaseOrder } from '../api/models';
 import { procureApi } from '../api/procureApi';
 import SearchModal from './SearchModal';
 
+function parseNumberInput(value: string): number {
+  const cleaned = value.replace(/,/g, '').trim();
+  if (cleaned === '' || cleaned === '.') return 0;
+  const num = Number(cleaned);
+  return isNaN(num) ? 0 : num;
+}
+
 interface POItemDetailProps {
   po: PurchaseOrder;
   onChange: (updatedPo: PurchaseOrder) => void;
@@ -77,7 +84,9 @@ const POItemDetail: React.FC<POItemDetailProps> = ({ po, onChange }) => {
   };
 
   const updateParent = (newItems: POItem[]) => {
-    const total = newItems.reduce((acc, item) => acc + (item.po_qty * item.unit_price), 0);
+    const total = newItems
+      .filter(item => item.status !== 'Cancelled')
+      .reduce((acc, item) => acc + (item.po_qty * item.unit_price), 0);
     onChange({ ...po, items: newItems, total_amount: total });
   };
 
@@ -153,19 +162,21 @@ const POItemDetail: React.FC<POItemDetailProps> = ({ po, onChange }) => {
                     </div>
                   </td>
                   <td>
-                    <input 
-                      type="number" 
-                      value={item.po_qty || ''} 
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={item.po_qty || ''}
                       style={{ width: '80px', padding: '0.3rem' }}
-                      onChange={(e) => handleItemChange(idx, 'po_qty', Number(e.target.value))}
+                      onChange={(e) => handleItemChange(idx, 'po_qty', parseNumberInput(e.target.value))}
                     />
                   </td>
                   <td>
-                    <input 
-                      type="number" 
-                      value={item.unit_price || ''} 
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={item.unit_price || ''}
                       style={{ width: '100px', padding: '0.3rem' }}
-                      onChange={(e) => handleItemChange(idx, 'unit_price', Number(e.target.value))}
+                      onChange={(e) => handleItemChange(idx, 'unit_price', parseNumberInput(e.target.value))}
                     />
                   </td>
                   <td style={{ textAlign: 'right', paddingRight: '1rem', fontWeight: 600 }}>
@@ -201,7 +212,10 @@ const POItemDetail: React.FC<POItemDetailProps> = ({ po, onChange }) => {
                 <tr style={{ background: 'rgba(14, 165, 233, 0.05)' }}>
                   <td colSpan={3} style={{ textAlign: 'right', fontWeight: 700 }}>Total:</td>
                   <td style={{ textAlign: 'right', paddingRight: '1rem', fontWeight: 700, color: 'var(--accent-color)' }}>
-                    {items.reduce((acc, i) => acc + (i.po_qty * i.unit_price), 0).toLocaleString()}
+                    {items
+                      .filter(i => i.status !== 'Cancelled')
+                      .reduce((acc, i) => acc + (i.po_qty * i.unit_price), 0)
+                      .toLocaleString()}
                   </td>
                   <td colSpan={3}></td>
                 </tr>
@@ -274,7 +288,7 @@ const POItemDetail: React.FC<POItemDetailProps> = ({ po, onChange }) => {
           </div>
           <div className="form-group">
             <label>Amount</label>
-            <input type="number" value={newAp.amount} onChange={e => setNewAp({ ...newAp, amount: Number(e.target.value) })} />
+            <input type="text" inputMode="decimal" value={newAp.amount} onChange={e => setNewAp({ ...newAp, amount: parseNumberInput(e.target.value) })} />
           </div>
           <div className="form-group">
             <label>Due Date</label>

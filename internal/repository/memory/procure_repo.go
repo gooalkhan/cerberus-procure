@@ -715,6 +715,36 @@ func (r *MemoryProcurementRepository) SaveCostAllocationItem(i *models.CostAlloc
 	return nil
 }
 
+func (r *MemoryProcurementRepository) GetAvailableCostAllocationLots() ([]models.CostAllocationLotCandidate, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return []models.CostAllocationLotCandidate{}, nil
+}
+
+func (r *MemoryProcurementRepository) GetCostAllocationLotCandidatesByIDs(ids []int) ([]models.CostAllocationLotCandidate, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return []models.CostAllocationLotCandidate{}, nil
+}
+
+func (r *MemoryProcurementRepository) GetAllCostAllocationLotCandidates() ([]models.CostAllocationLotCandidate, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return []models.CostAllocationLotCandidate{}, nil
+}
+
+func (r *MemoryProcurementRepository) GetCostAllocationReferenceBaseUnits(refType string, refID int) ([]models.CostAllocationBaseUnit, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return []models.CostAllocationBaseUnit{}, nil
+}
+
+func (r *MemoryProcurementRepository) GetAPIDsUsedForLots(lotIDs []int) (map[int]bool, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return make(map[int]bool), nil
+}
+
 func (r *MemoryProcurementRepository) GetContainersByBLID(blID int) ([]models.Container, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

@@ -2,6 +2,13 @@ import React, { useState, useEffect } from 'react';
 import SearchModal from './SearchModal';
 import { procureApi } from '../api/procureApi';
 
+function parseNumberInput(value: string): number {
+  const cleaned = value.replace(/,/g, '').trim();
+  if (cleaned === '' || cleaned === '.') return 0;
+  const num = Number(cleaned);
+  return isNaN(num) ? 0 : num;
+}
+
 export interface Column {
   key: string;
   label: string;
@@ -431,14 +438,15 @@ function CrudPage<T extends { [key: string]: any }>({ title, columns, fetchData,
                       </select>
                     ) : (
                       <input
-                        type={col.type || 'text'}
+                        type={col.type === 'number' ? 'text' : col.type || 'text'}
+                        inputMode={col.type === 'number' ? 'decimal' : undefined}
                         value={col.type === 'date' && selectedItem[col.key]
                           ? new Date(selectedItem[col.key]).toISOString().split('T')[0]
-                          : selectedItem[col.key] || ''}
+                          : selectedItem[col.key] ?? ''}
                         onChange={async (e) => {
                           let val: any = e.target.value;
                           if (col.type === 'number') {
-                            val = Number(val);
+                            val = parseNumberInput(val);
                           } else if (col.type === 'date') {
                             val = val ? new Date(val).toISOString() : null;
                           }

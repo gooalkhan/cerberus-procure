@@ -144,7 +144,9 @@ export interface CostAllocation {
   cost_allocation_id: number;
   allocation_date: string;
   total_allocated_amount: number;
+  is_late_cost_allocation: boolean;
   remark: string;
+  items?: CostAllocationItem[];
 }
 
 export interface CostAllocationItem {
@@ -153,6 +155,43 @@ export interface CostAllocationItem {
   lot_id: number;
   allocated_amount: number;
   ap_id: number;
+}
+
+export interface CostAllocationLotCandidate {
+  lot_id: number;
+  lot_no: string;
+  gr_id: number;
+  container_item_id: number;
+  ci_id: number;
+  container_id: number;
+  container_no: string;
+  bl_id: number;
+  bl_no: string;
+  po_id: number;
+  po_no: string;
+  item_id: number;
+  item_name: string;
+  qty: number;
+  gross_weight: number;
+  net_weight: number;
+  cbm: number;
+  unit_price: number;
+  currency: string;
+}
+
+export interface CostAllocationItemProposal {
+  lot_id: number;
+  allocated_amount: number;
+}
+
+export interface CostAllocationProposal {
+  ap_id: number;
+  ap_no: string;
+  amount: number;
+  local_amount: number;
+  currency: string;
+  allocation_type: string;
+  proposals: CostAllocationItemProposal[];
 }
 
 export interface BookingView {

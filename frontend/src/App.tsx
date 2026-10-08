@@ -8,6 +8,14 @@ import POItemDetail from './components/POItemDetail'
 import SearchModal from './components/SearchModal'
 import BulkBookingImport from './components/BulkBookingImport'
 import AP_TargetGroupDetail from './components/APTargetGroupDetail'
+import CostAllocationDetail from './components/CostAllocationDetail'
+
+function parseNumberInput(value: string): number {
+  const cleaned = value.replace(/,/g, '').trim();
+  if (cleaned === '' || cleaned === '.') return 0;
+  const num = Number(cleaned);
+  return isNaN(num) ? 0 : num;
+}
 
 function App() {
   const [user, setUser] = useState<User | null>(null)
@@ -319,7 +327,13 @@ function App() {
             ]}
             fetchData={procureApi.getCostAllocations}
             onSave={procureApi.saveCostAllocation}
-            emptyItem={{ cost_allocation_id: 0, allocation_date: new Date().toISOString(), total_allocated_amount: 0, remark: '' }}
+            emptyItem={{ cost_allocation_id: 0, allocation_date: new Date().toISOString(), total_allocated_amount: 0, is_late_cost_allocation: false, remark: '', items: [] }}
+            renderDetail={(item, onChange) => (
+              <CostAllocationDetail
+                costAllocation={item}
+                onChange={(updated) => onChange(updated as any)}
+              />
+            )}
             tableName="Cost_Allocation"
             idField="cost_allocation_id"
           />
@@ -541,7 +555,7 @@ function CIDetail({ ci }: { ci: any }) {
           </div>
           <div className="form-group">
             <label>Amount</label>
-            <input type="number" value={newAp.amount} onChange={e => setNewAp({ ...newAp, amount: Number(e.target.value) })} />
+            <input type="text" inputMode="decimal" value={newAp.amount} onChange={e => setNewAp({ ...newAp, amount: parseNumberInput(e.target.value) })} />
           </div>
           <div className="form-group">
             <label>Due Date</label>
@@ -553,6 +567,51 @@ function CIDetail({ ci }: { ci: any }) {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function AssociatedAPs({ referenceUuid, referenceType }: { referenceUuid: string, referenceType: string }) {
+  const [aps, setAps] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (!referenceUuid) return;
+    procureApi.getAccountPayables().then(list => {
+      setAps(list.filter(ap => ap.reference_uuid === referenceUuid && ap.reference_type === referenceType));
+    });
+  }, [referenceUuid, referenceType]);
+
+  return (
+    <div style={{ marginTop: '2rem' }}>
+      <h3>Associated Account Payables</h3>
+      <table className="sub-table">
+        <thead>
+          <tr>
+            <th>AP No</th>
+            <th>Amount</th>
+            <th>Currency</th>
+            <th>Local Amount</th>
+            <th>Status</th>
+            <th>Remark</th>
+          </tr>
+        </thead>
+        <tbody>
+          {aps.length === 0 ? (
+            <tr>
+              <td colSpan={6} style={{ textAlign: 'center', opacity: 0.6 }}>No APs linked to this {referenceType}.</td>
+            </tr>
+          ) : aps.map((ap, idx) => (
+            <tr key={idx}>
+              <td>{ap.ap_no}</td>
+              <td style={{ textAlign: 'right' }}>{ap.amount.toLocaleString()}</td>
+              <td>{ap.currency}</td>
+              <td style={{ textAlign: 'right' }}>{ap.local_amount.toLocaleString()}</td>
+              <td><span className={`badge ${ap.status}`}>{ap.status}</span></td>
+              <td>{ap.remark}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -593,6 +652,7 @@ function BLDetail({ bl }: { bl: any }) {
           ))}
         </tbody>
       </table>
+      <AssociatedAPs referenceUuid={bl.uuid} referenceType="BL" />
     </div>
   );
 }
@@ -612,7 +672,6 @@ function ContainerDetail({ container }: { container: any }) {
           <tr>
             <th>Item ID</th>
             <th>Qty</th>
-            <th>Price</th>
             <th>Weights (G/N)</th>
             <th>CBM</th>
           </tr>
@@ -620,19 +679,19 @@ function ContainerDetail({ container }: { container: any }) {
         <tbody>
           {(!items || items.length === 0) ? (
             <tr>
-              <td colSpan={5} style={{ textAlign: 'center', opacity: 0.6 }}>No items loaded in this container.</td>
+              <td colSpan={4} style={{ textAlign: 'center', opacity: 0.6 }}>No items loaded in this container.</td>
             </tr>
           ) : items.map((it, idx) => (
             <tr key={idx}>
               <td>{it.item_id}</td>
               <td>{it.load_qty}</td>
-              <td>{it.unit_price} {it.currency}</td>
               <td>{it.gross_weight} / {it.net_weight}</td>
               <td>{it.cbm}</td>
             </tr>
           ))}
         </tbody>
       </table>
+      <AssociatedAPs referenceUuid={container.uuid} referenceType="Container" />
     </div>
   );
 }
@@ -733,6 +792,10 @@ function BookingFlow({ booking }: { booking: any }) {
 function LandedGoodsDetail({ gr, onChange }: { gr: any, onChange: (updated: any) => void }) {
   const [lots, setLots] = useState<any[]>(gr.lots || []);
   const [containerItems, setContainerItems] = useState<any[]>([]);
+  const [bls, setBls] = useState<any[]>([]);
+  const [showModal, setShowModal] = useState(false);
+  const [selectedBL, setSelectedBL] = useState<number>(0);
+  const [selectedItems, setSelectedItems] = useState<Set<number>>(new Set());
 
   useEffect(() => {
     if (gr.gr_id) {
@@ -742,13 +805,37 @@ function LandedGoodsDetail({ gr, onChange }: { gr: any, onChange: (updated: any)
 
   useEffect(() => {
     procureApi.getBookings().then(setContainerItems);
+    procureApi.getBLs().then(setBls);
   }, []);
 
   const handleAddLot = () => {
-    const newLot = { lot_id: 0, container_item_id: 0, lot_no: '', expiry_date: null, qty: 0, remark: '' };
-    const updated = [...lots, newLot];
+    setSelectedBL(0);
+    setSelectedItems(new Set());
+    setShowModal(true);
+  };
+
+  const handleConfirmAdd = () => {
+    if (selectedItems.size === 0) {
+      alert('Please select at least one item.');
+      return;
+    }
+    const newLots = Array.from(selectedItems).map(containerItemId => {
+      const item = containerItems.find((ci: any) => ci.container_item_id === containerItemId);
+      return {
+        lot_id: 0,
+        container_item_id: containerItemId,
+        lot_no: '',
+        expiry_date: null,
+        qty: item?.load_qty || 0,
+        remark: '',
+      };
+    });
+    const updated = [...lots, ...newLots];
     setLots(updated);
     onChange({ ...gr, lots: updated });
+    setShowModal(false);
+    setSelectedBL(0);
+    setSelectedItems(new Set());
   };
 
   const handleUpdateLot = (idx: number, field: string, value: any) => {
@@ -763,6 +850,20 @@ function LandedGoodsDetail({ gr, onChange }: { gr: any, onChange: (updated: any)
     setLots(updated);
     onChange({ ...gr, lots: updated });
   };
+
+  const toggleItemSelection = (containerItemId: number) => {
+    const next = new Set(selectedItems);
+    if (next.has(containerItemId)) {
+      next.delete(containerItemId);
+    } else {
+      next.add(containerItemId);
+    }
+    setSelectedItems(next);
+  };
+
+  const filteredItems = selectedBL > 0
+    ? containerItems.filter((ci: any) => ci.bl_id === selectedBL)
+    : [];
 
   return (
     <div style={{ marginTop: '1rem' }}>
@@ -820,9 +921,10 @@ function LandedGoodsDetail({ gr, onChange }: { gr: any, onChange: (updated: any)
               </td>
               <td>
                 <input
-                  type="number"
+                  type="text"
+                  inputMode="decimal"
                   value={lot.qty}
-                  onChange={e => handleUpdateLot(idx, 'qty', Number(e.target.value))}
+                  onChange={e => handleUpdateLot(idx, 'qty', parseNumberInput(e.target.value))}
                   style={{ width: '80px', background: 'transparent', border: 'none', color: 'inherit' }}
                 />
               </td>
@@ -844,6 +946,74 @@ function LandedGoodsDetail({ gr, onChange }: { gr: any, onChange: (updated: any)
       <div style={{ marginTop: '0.5rem', fontSize: '0.8rem', opacity: 0.6 }}>
         Total Lot Qty: {lots.reduce((sum, l) => sum + (l.qty || 0), 0)}
       </div>
+
+      {showModal && (
+        <div className="modal-overlay" style={{ zIndex: 1100 }} onClick={() => setShowModal(false)}>
+          <div className="modal-content" style={{ maxWidth: '700px' }} onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Add Lot Lines by B/L</h3>
+              <button className="secondary" onClick={() => setShowModal(false)}>✕</button>
+            </div>
+
+            <div className="form-group" style={{ marginBottom: '1rem' }}>
+              <label>B/L No</label>
+              <select value={selectedBL} onChange={e => { setSelectedBL(Number(e.target.value)); setSelectedItems(new Set()); }}>
+                <option value={0}>Select B/L...</option>
+                {bls.map((bl: any) => (
+                  <option key={bl.bl_id} value={bl.bl_id}>
+                    {bl.bl_no}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {selectedBL > 0 && (
+              <div style={{ maxHeight: '300px', overflowY: 'auto', border: '1px solid var(--border-color)', borderRadius: '8px' }}>
+                {filteredItems.length === 0 ? (
+                  <p style={{ padding: '1rem', textAlign: 'center', opacity: 0.6 }}>No container items found for this B/L.</p>
+                ) : (
+                  <table className="sub-table" style={{ margin: 0 }}>
+                    <thead>
+                      <tr>
+                        <th style={{ width: '40px' }}></th>
+                        <th>Container Item ID</th>
+                        <th>PO No</th>
+                        <th>Item Name</th>
+                        <th style={{ textAlign: 'right' }}>Ship Qty</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredItems.map((item: any) => (
+                        <tr key={item.container_item_id} onClick={() => toggleItemSelection(item.container_item_id)} style={{ cursor: 'pointer' }}>
+                          <td style={{ textAlign: 'center' }}>
+                            <input
+                              type="checkbox"
+                              checked={selectedItems.has(item.container_item_id)}
+                              onChange={() => toggleItemSelection(item.container_item_id)}
+                              onClick={e => e.stopPropagation()}
+                            />
+                          </td>
+                          <td>{item.container_item_id}</td>
+                          <td>{item.po_no}</td>
+                          <td>{item.item_name}</td>
+                          <td style={{ textAlign: 'right' }}>{item.load_qty}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            )}
+
+            <div className="modal-actions">
+              <button className="secondary" onClick={() => setShowModal(false)}>Cancel</button>
+              <button className="btn-success" onClick={handleConfirmAdd} disabled={selectedItems.size === 0}>
+                Add {selectedItems.size > 0 ? `${selectedItems.size}` : ''} Lot Line{selectedItems.size > 1 ? 's' : ''}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

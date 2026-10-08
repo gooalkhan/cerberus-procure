@@ -91,6 +91,20 @@ func (uc *ProcurementUseCase) SavePurchaseOrder(po *models.PurchaseOrder) error 
 				return err
 			}
 		}
+
+		// Recalculate PO total excluding cancelled items
+		newTotal := 0.0
+		for _, item := range po.Items {
+			if item.Status != "Cancelled" {
+				newTotal += item.POQty * item.UnitPrice
+			}
+		}
+		if po.TotalAmount != newTotal {
+			po.TotalAmount = newTotal
+			if err := uc.repo.SavePurchaseOrder(po); err != nil {
+				return fmt.Errorf("failed to update PO total amount: %w", err)
+			}
+		}
 	}
 	return nil
 }
@@ -195,8 +209,264 @@ func (uc *ProcurementUseCase) GetCostAllocations() ([]models.CostAllocation, err
 	return uc.repo.GetCostAllocations()
 }
 
+func (uc *ProcurementUseCase) GetAvailableCostAllocationLots(late bool) ([]models.CostAllocationLotCandidate, error) {
+	if late {
+		return uc.repo.GetAllCostAllocationLotCandidates()
+	}
+	return uc.repo.GetAvailableCostAllocationLots()
+}
+
+func (uc *ProcurementUseCase) GetCostAllocationLotCandidatesByIDs(ids []int) ([]models.CostAllocationLotCandidate, error) {
+	return uc.repo.GetCostAllocationLotCandidatesByIDs(ids)
+}
+
+func (uc *ProcurementUseCase) CalculateCostAllocation(lotIDs []int, late bool) ([]models.CostAllocationProposal, error) {
+	selectedCandidates, err := uc.repo.GetCostAllocationLotCandidatesByIDs(lotIDs)
+	if err != nil {
+		return nil, err
+	}
+	if len(selectedCandidates) == 0 {
+		return []models.CostAllocationProposal{}, nil
+	}
+
+	// Collect reference UUIDs from selected lots
+	refUUIDs := make(map[string]bool)
+	for _, c := range selectedCandidates {
+		if c.POUUID != "" {
+			refUUIDs[c.POUUID] = true
+		}
+		if c.CIUUID != "" {
+			refUUIDs[c.CIUUID] = true
+		}
+		if c.BLUUID != "" {
+			refUUIDs[c.BLUUID] = true
+		}
+		if c.ContainerUUID != "" {
+			refUUIDs[c.ContainerUUID] = true
+		}
+		if c.ContainerItemUUID != "" {
+			refUUIDs[c.ContainerItemUUID] = true
+		}
+		if c.GRUUID != "" {
+			refUUIDs[c.GRUUID] = true
+		}
+		if c.LotUUID != "" {
+			refUUIDs[c.LotUUID] = true
+		}
+	}
+
+	if len(refUUIDs) == 0 {
+		return []models.CostAllocationProposal{}, nil
+	}
+
+	// Find APs matching reference UUIDs and not fully allocated
+	aps, err := uc.repo.GetAccountPayables()
+	if err != nil {
+		return nil, err
+	}
+
+	// In late cost allocation, exclude APs already used for the selected lots
+	var usedAPIDs map[int]bool
+	if late {
+		usedAPIDs, _ = uc.repo.GetAPIDsUsedForLots(lotIDs)
+	}
+
+	var matchedAPs []models.AccountPayable
+	for _, ap := range aps {
+		if !refUUIDs[ap.ReferenceUUID] || ap.AllocationStatus == "Closed" {
+			continue
+		}
+		if late && usedAPIDs[ap.ID] {
+			continue
+		}
+		matchedAPs = append(matchedAPs, ap)
+	}
+
+	// Helper to compute base value for a candidate based on allocation type
+	computeBase := func(c models.CostAllocationLotCandidate, allocationType string) float64 {
+		switch allocationType {
+		case "Weight":
+			if c.GrossWeight > 0 {
+				return c.GrossWeight
+			}
+			return c.Qty
+		case "Volume":
+			if c.CBM > 0 {
+				return c.CBM
+			}
+			return c.Qty
+		case "Quantity":
+			return c.Qty
+		case "Value":
+			return c.Qty * c.UnitPrice
+		case "Unit":
+			return 1
+		default:
+			return c.Qty
+		}
+	}
+
+	// Helper to compute base value from a base unit based on allocation type
+	computeBaseFromUnit := func(u models.CostAllocationBaseUnit, allocationType string) float64 {
+		switch allocationType {
+		case "Weight":
+			if u.GrossWeight > 0 {
+				return u.GrossWeight
+			}
+			return u.Qty
+		case "Volume":
+			if u.CBM > 0 {
+				return u.CBM
+			}
+			return u.Qty
+		case "Quantity":
+			return u.Qty
+		case "Value":
+			return u.Qty * u.UnitPrice
+		case "Unit":
+			return 1
+		default:
+			return u.Qty
+		}
+	}
+
+	// Helper to check if a candidate belongs to an AP reference
+	matchesReference := func(c models.CostAllocationLotCandidate, refUUID string, refType string) bool {
+		switch refType {
+		case "PO":
+			return c.POUUID == refUUID
+		case "CI":
+			return c.CIUUID == refUUID
+		case "BL":
+			return c.BLUUID == refUUID
+		case "Container":
+			return c.ContainerUUID == refUUID
+		case "ContainerItem", "Container Item":
+			return c.ContainerItemUUID == refUUID
+		case "GR":
+			return c.GRUUID == refUUID
+		case "Lot":
+			return c.LotUUID == refUUID
+		default:
+			return false
+		}
+	}
+
+	// Helper to get reference ID from a selected candidate based on reference type
+	getRefID := func(c models.CostAllocationLotCandidate, refType string) int {
+		switch refType {
+		case "PO":
+			return c.POID
+		case "CI":
+			return c.CIID
+		case "BL":
+			return c.BLID
+		case "Container":
+			return c.ContainerID
+		case "ContainerItem", "Container Item":
+			return c.ContainerItemID
+		case "GR":
+			return c.GRID
+		case "Lot":
+			return c.LotID
+		default:
+			return 0
+		}
+	}
+
+	// Calculate distribution for each AP
+	proposals := make([]models.CostAllocationProposal, 0, len(matchedAPs))
+	for _, ap := range matchedAPs {
+		proposal := models.CostAllocationProposal{
+			APID:           ap.ID,
+			APNo:           ap.APNo,
+			Amount:         ap.Amount,
+			LocalAmount:    ap.LocalAmount,
+			Currency:       ap.Currency,
+			AllocationType: ap.AllocationType,
+			Proposals:      []models.CostAllocationItemProposal{},
+		}
+
+		// Find one selected candidate that matches this AP reference to get the reference ID
+		refID := 0
+		for _, c := range selectedCandidates {
+			if matchesReference(c, ap.ReferenceUUID, ap.ReferenceType) {
+				refID = getRefID(c, ap.ReferenceType)
+				break
+			}
+		}
+		if refID == 0 {
+			continue
+		}
+
+		// Compute total base for the referenced entity including unlanded items
+		baseUnits, err := uc.repo.GetCostAllocationReferenceBaseUnits(ap.ReferenceType, refID)
+		if err != nil {
+			continue
+		}
+		var totalRefBase float64
+		for _, u := range baseUnits {
+			totalRefBase += computeBaseFromUnit(u, ap.AllocationType)
+		}
+
+		// Compute selected lots' base within the referenced entity
+		var selectedRefBase float64
+		selectedBaseValues := make(map[int]float64)
+		for _, c := range selectedCandidates {
+			if matchesReference(c, ap.ReferenceUUID, ap.ReferenceType) {
+				base := computeBase(c, ap.AllocationType)
+				selectedBaseValues[c.LotID] = base
+				selectedRefBase += base
+			}
+		}
+
+		if totalRefBase == 0 || selectedRefBase == 0 {
+			continue
+		}
+
+		// Prorate AP amount to the selected portion
+		proratedAmount := ap.LocalAmount * selectedRefBase / totalRefBase
+
+		// Distribute prorated amount among selected lots proportionally
+		distributed := 0.0
+		for _, c := range selectedCandidates {
+			base := selectedBaseValues[c.LotID]
+			if base == 0 {
+				continue
+			}
+			amount := proratedAmount * base / selectedRefBase
+			distributed += amount
+			proposal.Proposals = append(proposal.Proposals, models.CostAllocationItemProposal{
+				LotID:           c.LotID,
+				AllocatedAmount: amount,
+			})
+		}
+
+		// Adjust rounding on the last item
+		if len(proposal.Proposals) > 0 {
+			last := &proposal.Proposals[len(proposal.Proposals)-1]
+			last.AllocatedAmount += proratedAmount - distributed
+		}
+
+		proposals = append(proposals, proposal)
+	}
+
+	return proposals, nil
+}
+
 func (uc *ProcurementUseCase) SaveCostAllocation(ca *models.CostAllocation) error {
-	return uc.repo.SaveCostAllocation(ca)
+	if err := uc.repo.SaveCostAllocation(ca); err != nil {
+		return err
+	}
+	if ca.Items != nil {
+		for i := range ca.Items {
+			ca.Items[i].CostAllocationID = ca.ID
+			if err := uc.repo.SaveCostAllocationItem(&ca.Items[i]); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // Container Items

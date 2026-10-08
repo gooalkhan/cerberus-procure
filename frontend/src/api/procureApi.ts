@@ -2,8 +2,8 @@ import {
   ItemMaster, VendorMaster, PurchaseOrder, POItem, 
   CommercialInvoice, CIAggregatedItem, AccountPayable, Container, 
   ContainerItem, BL, GoodsReceipt, InventoryLot, 
-  CostAllocation, CostAllocationItem, BookingView,
-  BookingTemplateRow, BulkImportRow,
+  CostAllocation, CostAllocationItem, CostAllocationLotCandidate, CostAllocationProposal,
+  BookingView, BookingTemplateRow, BulkImportRow,
   AP_TargetGroup, AP_TargetGroupItem, APTargetGroupReference
 } from './models';
 
@@ -39,6 +39,10 @@ declare global {
       saveInventoryLot: (json: string) => Promise<void>;
       getCostAllocations: () => Promise<string>;
       saveCostAllocation: (json: string) => Promise<void>;
+      getCostAllocationItems: (costAllocationId: number) => Promise<string>;
+      getAvailableCostAllocationLots: (late: boolean) => Promise<string>;
+      getCostAllocationLotCandidatesByIDs: (json: string) => Promise<string>;
+      calculateCostAllocation: (json: string) => Promise<string>;
       getBookings: () => Promise<string>;
       getBookingTemplate: () => Promise<string>;
       bulkImportBookings: (json: string) => Promise<string>;
@@ -238,6 +242,22 @@ export const procureApi = {
     const processed = fixDates(i);
     if (isWasm()) return window.procureApi.saveCostAllocation(JSON.stringify(processed));
     return request('/allocations', 'POST', processed);
+  },
+  getCostAllocationItems: async (costAllocationId: number): Promise<CostAllocationItem[]> => {
+    if (isWasm()) return JSON.parse(await window.procureApi.getCostAllocationItems(costAllocationId));
+    return request<CostAllocationItem[]>(`/allocations/items?costAllocationId=${costAllocationId}`);
+  },
+  getAvailableCostAllocationLots: async (late: boolean = false): Promise<CostAllocationLotCandidate[]> => {
+    if (isWasm()) return JSON.parse(await window.procureApi.getAvailableCostAllocationLots(late));
+    return request<CostAllocationLotCandidate[]>(`/allocations/available-lots?late=${late ? 'true' : 'false'}`);
+  },
+  getCostAllocationLotCandidatesByIDs: async (lotIds: number[]): Promise<CostAllocationLotCandidate[]> => {
+    if (isWasm()) return JSON.parse(await window.procureApi.getCostAllocationLotCandidatesByIDs(JSON.stringify(lotIds)));
+    return request<CostAllocationLotCandidate[]>('/allocations/lot-candidates', 'POST', lotIds);
+  },
+  calculateCostAllocation: async (lotIds: number[], late: boolean = false): Promise<CostAllocationProposal[]> => {
+    if (isWasm()) return JSON.parse(await window.procureApi.calculateCostAllocation(JSON.stringify({ lot_ids: lotIds, late })));
+    return request<CostAllocationProposal[]>('/allocations/calculate', 'POST', { lot_ids: lotIds, late });
   },
 
   // Unified Views
