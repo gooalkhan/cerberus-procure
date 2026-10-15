@@ -9,6 +9,8 @@ import SearchModal from './components/SearchModal'
 import BulkBookingImport from './components/BulkBookingImport'
 import AP_TargetGroupDetail from './components/APTargetGroupDetail'
 import CostAllocationDetail from './components/CostAllocationDetail'
+import ConstraintProfileDetail from './components/ConstraintProfileDetail'
+import ConstraintChainEditor from './components/ConstraintChainEditor'
 
 function parseNumberInput(value: string): number {
   const cleaned = value.replace(/,/g, '').trim();
@@ -23,6 +25,16 @@ function App() {
   const [loading, setLoading] = useState(true)
   const [showBulkImport, setShowBulkImport] = useState(false)
   const [bookingsRefreshKey, setBookingsRefreshKey] = useState(0)
+  const [cbmDialog, setCbmDialog] = useState<null | {
+    current: number;
+    unitOld: number;
+    unitNew: number;
+    optOld: number;
+    optNew: number;
+    resolve: (value: number) => void;
+  }>(null)
+
+  const fmtNum = (v: number) => (Math.round((v + Number.EPSILON) * 100000) / 100000).toLocaleString()
 
   const savePurchaseOrderWithWarning = async (po: any) => {
     if (po.po_id) {
@@ -43,6 +55,31 @@ function App() {
       }
     }
     return procureApi.savePurchaseOrder(po);
+  }
+
+  const saveItemWithValidation = async (item: any) => {
+    const boxQty = Number(item.box_qty) || 0;
+    const bpp = Number(item.boxes_per_pallet) || 0;
+    const w = Number(item.box_width) || 0;
+    const l = Number(item.box_length) || 0;
+    const h = Number(item.box_height) || 0;
+    if (boxQty <= 0) {
+      alert('박스 입수(박스당 수량)는 필수입니다.');
+      throw new Error('validation');
+    }
+    if (!(bpp > 0) && !(w > 0 && l > 0 && h > 0)) {
+      alert('팔렛당 박스 적재량 또는 박스 규격(가로/세로/높이) 중 하나는 필수입니다.');
+      throw new Error('validation');
+    }
+    await procureApi.saveItem(item);
+  }
+
+  const saveCostAllocationCleaned = async (item: any) => {
+    const cleaned = {
+      ...item,
+      items: (item.items || []).filter((it: any) => !(it.ap_id === 0 && (it.allocated_amount === 0 || it.allocated_amount == null))),
+    };
+    await procureApi.saveCostAllocation(cleaned);
   }
 
   useEffect(() => {
@@ -74,15 +111,57 @@ function App() {
               { key: 'sku_code', label: 'SKU Code' },
               { key: 'name', label: 'Name' },
               { key: 'vendor_id', label: 'Vendor ID', type: 'number', searchType: 'Vendor' },
-              { key: 'cbm', label: 'CBM', type: 'number' },
+              { key: 'default_constraint_profile_id', label: 'Constraint Profile', type: 'number', searchType: 'Constraint Profile' },
+              { key: 'box_qty', label: '박스 입수*', type: 'number' },
+              { key: 'boxes_per_pallet', label: '팔렛당 박스', type: 'number' },
+              { key: 'box_width', label: '박스 가로 (cm)', type: 'number' },
+              { key: 'box_length', label: '박스 세로 (cm)', type: 'number' },
+              { key: 'box_height', label: '박스 높이 (cm)', type: 'number' },
+              { key: 'cbm', label: 'CBM (미입력 시 자동 계산)', type: 'number' },
               { key: 'net_weight', label: 'Net Weight', type: 'number' },
               { key: 'gross_weight', label: 'Gross Weight', type: 'number' },
+              { key: 'remark', label: 'Remark', fullWidth: true },
             ]}
             fetchData={procureApi.getItems}
-            onSave={procureApi.saveItem}
-            emptyItem={{ item_id: 0, sku_code: '', name: '', vendor_id: 0, cbm: 0, net_weight: 0, gross_weight: 0, remark: '' }}
+            onSave={saveItemWithValidation}
+            emptyItem={{ item_id: 0, sku_code: '', name: '', vendor_id: 0, default_constraint_profile_id: 0, cbm: 0, box_qty: 0, boxes_per_pallet: 0, box_width: 0, box_length: 0, box_height: 0, net_weight: 0, gross_weight: 0, remark: '' }}
             tableName="Item_Master"
             idField="item_id"
+          />
+        )
+      case 'constraint_profiles':
+        return (
+          <CrudPage
+            title="Constraint Profiles"
+            columns={[
+              { key: 'constraint_profile_id', label: 'ID', formHidden: true, filterType: 'none' },
+              { key: 'profile_no', label: 'Profile No' },
+              { key: 'name', label: 'Name' },
+              { key: 'remark', label: 'Remark', fullWidth: true },
+            ]}
+            fetchData={procureApi.getConstraintProfiles}
+            onSave={async (p: any) => { await procureApi.saveConstraintProfile(p); }}
+            emptyItem={{ constraint_profile_id: 0, profile_no: '', name: '', remark: '', uuid: '', steps: [] }}
+            renderDetail={(p, onChange) => <ConstraintProfileDetail profile={p} onChange={onChange as any} />}
+            tableName="Constraint_Profile"
+            idField="constraint_profile_id"
+          />
+        )
+      case 'constraints':
+        return (
+          <CrudPage
+            title="Constraints"
+            columns={[
+              { key: 'constraint_id', label: 'ID', formHidden: true, filterType: 'none' },
+              { key: 'name', label: 'Name' },
+              { key: 'lead_time_days', label: 'Lead (days)', type: 'number' },
+              { key: 'remark', label: 'Remark', fullWidth: true },
+            ]}
+            fetchData={procureApi.getConstraints}
+            onSave={async (c: any) => { await procureApi.saveConstraint(c); }}
+            emptyItem={{ constraint_id: 0, name: '', lead_time_days: 0, remark: '' }}
+            tableName="Constraint_Master"
+            idField="constraint_id"
           />
         )
       case 'vendors':
@@ -151,6 +230,7 @@ function App() {
               { key: 'container_id', label: 'Container ID', type: 'number', tableHidden: true, searchType: 'Container' },
               { key: 'bl_id', label: 'BL ID', type: 'number', tableHidden: true, searchType: 'BL' },
               { key: 'po_item_id', label: 'PO Item ID', type: 'number', tableHidden: true, searchType: 'PO Item' },
+              { key: 'constraint_profile_id', label: 'Constraint Profile', type: 'number', tableHidden: true, searchType: 'Constraint Profile' },
               { key: 'ci_id', label: 'CI ID', type: 'number', tableHidden: true, searchType: 'CI' },
               { key: 'item_name', label: 'Item Name', formHidden: true },
               { key: 'divider_1', label: '', divider: true },
@@ -161,22 +241,41 @@ function App() {
             ]}
             fetchData={procureApi.getBookings}
             onSave={async (booking: any) => {
+              let cbm = booking.cbm || 0;
+              if (booking.container_item_id > 0) {
+                const snapUnit = booking.unit_cbm || 0;      // Container_Item 스냅샷 단위 CBM (변경 전)
+                const masterUnit = booking.master_cbm || 0;  // 현재 Item_Master 단위 CBM (변경 후)
+                const newQty = booking.load_qty || 0;
+                const optOld = snapUnit * newQty;   // 변경 전(스냅샷) 단위 CBM으로 계산
+                const optNew = masterUnit * newQty; // 변경 후(Item_Master) 단위 CBM으로 계산
+                const unitsDiffer = Math.abs(snapUnit - masterUnit) > 0.0000001;
+                if (unitsDiffer && (Math.abs(optOld - cbm) > 0.0001 || Math.abs(optNew - cbm) > 0.0001)) {
+                  // Item_Master 단위 CBM이 변경된 경우 → 어떤 단위로 갱신할지 선택
+                  cbm = await new Promise<number>((resolve) => {
+                    setCbmDialog({ current: cbm, unitOld: snapUnit, unitNew: masterUnit, optOld, optNew, resolve });
+                  });
+                } else if (!unitsDiffer && Math.abs(optOld - cbm) > 0.0001) {
+                  // 단위 CBM이 동일하면 수량 변경분만 자동 반영
+                  cbm = optOld;
+                }
+              }
               await procureApi.saveContainerItem({
                 container_item_id: booking.container_item_id,
                 container_id: booking.container_id,
                 bl_id: booking.bl_id,
                 po_item_id: booking.po_item_id,
                 ci_id: booking.ci_id || 0,
+                constraint_profile_id: booking.constraint_profile_id || 0,
                 load_qty: booking.load_qty,
                 gross_weight: booking.gross_weight || 0,
                 net_weight: booking.net_weight || 0,
-                cbm: booking.cbm || 0,
+                cbm: cbm,
                 temporary_eta: booking.temporary_eta || null,
                 uuid: booking.uuid || '',
                 remark: booking.remark || '',
               });
             }}
-            emptyItem={{ container_item_id: 0, container_id: 0, container_no: '', status: 'Loaded', total_cbm: 0, total_net_wgt: 0, total_gross_wgt: 0, bl_id: 0, bl_no: '', bl_status: 'Released', etd: null, eta: null, pol: '', pod: '', carrier: '', vessel_name: '', po_item_id: 0, item_id: 0, ci_id: 0, load_qty: 0, gross_weight: 0, net_weight: 0, cbm: 0, temporary_eta: null, uuid: '', remark: '' }}
+            emptyItem={{ container_item_id: 0, container_id: 0, container_no: '', status: 'Loaded', total_cbm: 0, total_net_wgt: 0, total_gross_wgt: 0, bl_id: 0, bl_no: '', bl_status: 'Released', etd: null, eta: null, pol: '', pod: '', carrier: '', vessel_name: '', po_item_id: 0, item_id: 0, ci_id: 0, constraint_profile_id: 0, load_qty: 0, gross_weight: 0, net_weight: 0, cbm: 0, master_cbm: 0, unit_cbm: 0, temporary_eta: null, uuid: '', remark: '' }}
             renderDetail={(booking) => <BookingFlow booking={booking} />}
             tableName="Container_Item"
             idField="container_item_id"
@@ -257,9 +356,9 @@ function App() {
               { key: 'ap_id', label: 'ID', formHidden: true, filterType: 'none' },
               { key: 'ap_no', label: 'AP No' },
               { key: 'vendor_id', label: 'Vendor ID', type: 'number', searchType: 'Vendor' },
-              { key: 'amount', label: 'Amount', type: 'number', filterType: 'none' },
+              { key: 'amount', label: 'Amount', type: 'number', filterType: 'none', readOnly: (item) => !!item.has_allocation },
               { key: 'currency', label: 'Billing Currency' },
-              { key: 'local_amount', label: 'Local Amount (Korean Won)', type: 'number', filterType: 'none' },
+              { key: 'local_amount', label: 'Local Amount (Korean Won)', type: 'number', filterType: 'none', readOnly: (item) => !!item.has_allocation },
               { key: 'due_date', label: 'Due Date', type: 'date' },
               { key: 'date_of_payment', label: 'Payment Date', type: 'date', filterType: 'none' },
               { key: 'status', label: 'Pay Status', filterType: 'select', filterOptions: ['paid', 'unpaid'] },
@@ -311,6 +410,7 @@ function App() {
             title="Landed Goods"
             columns={[
               { key: 'gr_id', label: 'ID', formHidden: true, filterType: 'none' },
+              { key: 'gr_no', label: 'GR No' },
               { key: 'receive_date', label: 'Receive Date', type: 'date' },
               { key: 'remark', label: 'Remark', fullWidth: true },
               { key: 'divider_lots', label: '', divider: true },
@@ -330,7 +430,7 @@ function App() {
                 }
               }
             }}
-            emptyItem={{ gr_id: 0, receive_date: new Date().toISOString(), remark: '', lots: [] }}
+            emptyItem={{ gr_id: 0, gr_no: '', receive_date: new Date().toISOString(), remark: '', lots: [] }}
             renderDetail={(gr, onChange) => <LandedGoodsDetail gr={gr} onChange={onChange} />}
             tableName="Goods_Receipt"
             idField="gr_id"
@@ -347,7 +447,7 @@ function App() {
               { key: 'remark', label: 'Remark', fullWidth: true },
             ]}
             fetchData={procureApi.getCostAllocations}
-            onSave={procureApi.saveCostAllocation}
+            onSave={saveCostAllocationCleaned}
             emptyItem={{ cost_allocation_id: 0, allocation_date: new Date().toISOString(), total_allocated_amount: 0, is_late_cost_allocation: false, remark: '', items: [] }}
             renderDetail={(item, onChange) => (
               <CostAllocationDetail
@@ -384,13 +484,77 @@ function App() {
           setBookingsRefreshKey(prev => prev + 1);
         }} />
       )}
+
+      {cbmDialog && (
+        <div className="modal-overlay">
+          <div className="modal-content" style={{ maxWidth: '480px' }}>
+            <div className="modal-header">
+              <h2>CBM 갱신 방식 선택</h2>
+              <button className="secondary" onClick={() => { cbmDialog.resolve(cbmDialog.current); setCbmDialog(null); }}>✕</button>
+            </div>
+            <div style={{ padding: '1rem 0', color: 'var(--text-primary)', fontSize: '0.9rem' }}>
+              <p style={{ marginBottom: '0.75rem' }}>
+                Item_Master의 단위 CBM이 변경되어 Container_Item의 총 CBM 재계산에 두 가지 방식이 가능합니다. 계산에 사용할 단위 CBM을 선택해 주세요.
+              </p>
+              <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>
+                현재 총 CBM: <strong>{fmtNum(cbmDialog.current)}</strong>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+                <button
+                  style={{ textAlign: 'left', padding: '0.75rem 1rem', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', cursor: 'pointer' }}
+                  onClick={() => { cbmDialog.resolve(cbmDialog.optOld); setCbmDialog(null); }}
+                >
+                  <div style={{ fontWeight: 600 }}>
+                    변경 전 단위 CBM (스냅샷 {fmtNum(cbmDialog.unitOld)})
+                  </div>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                    Container_Item에 저장된 기존 단위 CBM을 그대로 사용 → 총 CBM {fmtNum(cbmDialog.optOld)}
+                  </div>
+                </button>
+                <button
+                  style={{ textAlign: 'left', padding: '0.75rem 1rem', background: '#eff6ff', border: '1px solid #93c5fd', borderRadius: '8px', cursor: 'pointer' }}
+                  onClick={() => { cbmDialog.resolve(cbmDialog.optNew); setCbmDialog(null); }}
+                >
+                  <div style={{ fontWeight: 600 }}>
+                    변경 후 단위 CBM (Item_Master {fmtNum(cbmDialog.unitNew)})
+                  </div>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                    현재 Item_Master의 단위 CBM을 적용 → 총 CBM {fmtNum(cbmDialog.optNew)}
+                  </div>
+                </button>
+                <button
+                  className="secondary"
+                  style={{ padding: '0.6rem' }}
+                  onClick={() => { cbmDialog.resolve(cbmDialog.current); setCbmDialog(null); }}
+                >
+                  기존 값 유지 ({fmtNum(cbmDialog.current)})
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
 
 function APDetail({ ap, onChange }: { ap: any, onChange: (updated: any) => void }) {
   const [refNo, setRefNo] = useState('')
+  const [resolvedNo, setResolvedNo] = useState('')
   const [isSearchOpen, setIsSearchOpen] = useState(false)
+
+  // Reference UUID가 입력되면 해당 문서의 번호(GR No, CI No 등)를 조회해 표시
+  useEffect(() => {
+    let active = true
+    if (ap.reference_type && ap.reference_uuid) {
+      procureApi.getReferenceNo(ap.reference_type, ap.reference_uuid)
+        .then(no => { if (active) setResolvedNo(no) })
+        .catch(() => { if (active) setResolvedNo('') })
+    } else {
+      setResolvedNo('')
+    }
+    return () => { active = false }
+  }, [ap.reference_type, ap.reference_uuid])
 
   const handleOpenSearch = () => {
     setIsSearchOpen(true)
@@ -411,7 +575,7 @@ function APDetail({ ap, onChange }: { ap: any, onChange: (updated: any) => void 
             value={ap.allocation_type}
             onChange={e => onChange({ ...ap, allocation_type: e.target.value })}
           >
-            {['Weight', 'Volume', 'Quantity', 'Value', 'Unit'].map(t => (
+            {['Weight', 'Volume', 'Quantity', 'Value', 'Row'].map(t => (
               <option key={t} value={t}>{t}</option>
             ))}
           </select>
@@ -443,6 +607,16 @@ function APDetail({ ap, onChange }: { ap: any, onChange: (updated: any) => void 
         <div className="form-group">
           <label>Resolved Reference UUID</label>
           <input type="text" value={ap.reference_uuid} readOnly style={{ opacity: 0.6 }} />
+        </div>
+        <div className="form-group">
+          <label>Reference No (자동 조회)</label>
+          <input
+            type="text"
+            value={resolvedNo}
+            readOnly
+            placeholder={ap.reference_type === 'Container Item' ? '(번호 없음)' : '문서 번호'}
+            style={{ opacity: 0.85, fontWeight: 600 }}
+          />
         </div>
       </div>
 
@@ -771,6 +945,13 @@ function VendorDetail({ vendor }: { vendor: any }) {
 
 
 function BookingFlow({ booking }: { booking: any }) {
+  const [avail, setAvail] = useState<any>(null);
+  useEffect(() => {
+    if (booking.container_item_id) {
+      procureApi.getConstraintAvailability(booking.container_item_id).then(setAvail).catch(() => setAvail(null));
+    }
+  }, [booking.container_item_id]);
+
   const Step = ({ label, value, color }: { label: string, value: string, color: string }) => (
     <div style={{
       flex: 1,
@@ -806,6 +987,12 @@ function BookingFlow({ booking }: { booking: any }) {
       <div style={{ marginTop: '1rem', fontSize: '0.8rem', opacity: 0.6, textAlign: 'center' }}>
         Linking: PO #{booking.po_no || '...'} contains {booking.load_qty} units of {booking.item_name || '...'} loaded in Container {booking.container_no || '...'} under B/L {booking.bl_no || '...'} for Invoice {booking.ci_no || '...'}.
       </div>
+      {avail && (
+        <div style={{ marginTop: '1rem', padding: '0.75rem 1rem', background: 'rgba(56,189,248,0.08)', border: '1px solid rgba(56,189,248,0.3)', borderRadius: '8px', fontSize: '0.85rem' }}>
+          ▶ 예상 Cost Allocation 가능일: <strong>{avail.expected_ready_date ? String(avail.expected_ready_date).split('T')[0] : '미정 (Temporary ETA 필요)'}</strong>
+          {avail.profile_name ? <span style={{ color: 'var(--text-secondary)' }}> · {avail.profile_name} (도착→입고 {avail.arrival_to_gr_days}일 + 제약 {avail.total_lead_days - avail.arrival_to_gr_days}일 = {avail.total_lead_days}일)</span> : null}
+        </div>
+      )}
     </div>
   );
 }
@@ -815,6 +1002,7 @@ function LandedGoodsDetail({ gr, onChange }: { gr: any, onChange: (updated: any)
   const [containerItems, setContainerItems] = useState<any[]>([]);
   const [bls, setBls] = useState<any[]>([]);
   const [showModal, setShowModal] = useState(false);
+  const [constraintLot, setConstraintLot] = useState<any>(null);
   const [selectedBL, setSelectedBL] = useState<number>(0);
   const [selectedItems, setSelectedItems] = useState<Set<number>>(new Set());
 
@@ -957,7 +1145,10 @@ function LandedGoodsDetail({ gr, onChange }: { gr: any, onChange: (updated: any)
                   style={{ width: '100%', background: 'transparent', border: 'none', color: 'inherit' }}
                 />
               </td>
-              <td>
+              <td style={{ whiteSpace: 'nowrap' }}>
+                {lot.lot_id > 0 && (
+                  <button className="secondary" onClick={() => setConstraintLot(lot)} style={{ padding: '2px 8px', marginRight: '4px' }} title="행정 제약 체인">제약</button>
+                )}
                 <button className="secondary" onClick={() => handleRemoveLot(idx)} style={{ padding: '2px 8px' }}>✕</button>
               </td>
             </tr>
@@ -1034,6 +1225,14 @@ function LandedGoodsDetail({ gr, onChange }: { gr: any, onChange: (updated: any)
             </div>
           </div>
         </div>
+      )}
+      {constraintLot && (
+        <ConstraintChainEditor
+          lotId={constraintLot.lot_id}
+          lotNo={constraintLot.lot_no}
+          onClose={() => setConstraintLot(null)}
+          onChanged={() => { if (gr.gr_id) procureApi.getInventoryLotsByGRID(gr.gr_id).then(setLots); }}
+        />
       )}
     </div>
   );

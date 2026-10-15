@@ -69,15 +69,9 @@ export default function AP_TargetGroupDetail({ group, onChange }: AP_TargetGroup
     onChange({ ...group, items: newItems });
   };
 
-  const handleAddReference = async () => {
+  const handleAddReference = () => {
     if (!selectedRefUUID) {
       alert('참조를 선택해주세요.');
-      return;
-    }
-
-    const targetGroupId = group.ap_target_group_id;
-    if (!targetGroupId) {
-      alert('먼저 그룹을 저장해주세요.');
       return;
     }
 
@@ -86,36 +80,24 @@ export default function AP_TargetGroupDetail({ group, onChange }: AP_TargetGroup
       return;
     }
 
+    // 그룹 저장 시 함께 저장되도록 로컬에만 추가 (그룹이 아직 저장 전이어도 가능)
     const newItem: AP_TargetGroupItem = {
       ap_target_group_item_id: 0,
-      ap_target_group_id: targetGroupId,
+      ap_target_group_id: group.ap_target_group_id || 0,
       reference_uuid: selectedRefUUID,
       remark: '',
     };
-
-    try {
-      await procureApi.saveAPTargetGroupItem(newItem);
-      const updated = [...items, newItem];
-      setItems(updated);
-      updateParent(updated);
-      setShowRefSelector(false);
-      setSelectedRefUUID('');
-    } catch (e: any) {
-      alert(`추가 실패: ${e.message}`);
-    }
+    const updated = [...items, newItem];
+    setItems(updated);
+    updateParent(updated);
+    setShowRefSelector(false);
+    setSelectedRefUUID('');
   };
 
-  const handleRemoveItem = async (idx: number, item: AP_TargetGroupItem) => {
-    try {
-      if (item.ap_target_group_item_id) {
-        await procureApi.deleteAPTargetGroupItem(item.ap_target_group_item_id);
-      }
-      const updated = items.filter((_, i) => i !== idx);
-      setItems(updated);
-      updateParent(updated);
-    } catch (e: any) {
-      alert(`삭제 실패: ${e.message}`);
-    }
+  const handleRemoveItem = (idx: number) => {
+    const updated = items.filter((_, i) => i !== idx);
+    setItems(updated);
+    updateParent(updated);
   };
 
   const getRefDisplay = (uuid: string) => {
@@ -129,7 +111,12 @@ export default function AP_TargetGroupDetail({ group, onChange }: AP_TargetGroup
   return (
     <div style={{ marginTop: '2rem', borderTop: '1px solid var(--border-color)', paddingTop: '1.5rem' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-        <h3 style={{ color: 'var(--accent-color)' }}>Grouped AP References</h3>
+        <h3 style={{ color: 'var(--accent-color)' }}>
+          Grouped AP References
+          <span style={{ fontSize: '0.75rem', fontWeight: 400, color: 'var(--text-secondary)', marginLeft: '0.5rem' }}>
+            (추가/삭제 후 Save Changes를 눌러 저장됩니다)
+          </span>
+        </h3>
         <button className="secondary" style={{ padding: '0.3rem 0.8rem', fontSize: '0.8rem' }} onClick={() => { setSelectedRefType(groupType); setSelectedRefUUID(''); setShowRefSelector(true); }}>
           + Add Reference
         </button>
@@ -153,7 +140,7 @@ export default function AP_TargetGroupDetail({ group, onChange }: AP_TargetGroup
                   <td>{groupType}</td>
                   <td style={{ fontSize: '0.85rem' }}>{getRefDisplay(item.reference_uuid)}</td>
                   <td>
-                    <button className="btn-danger secondary" style={{ padding: '0.2rem 0.5rem' }} onClick={() => handleRemoveItem(idx, item)}>✕</button>
+                    <button className="btn-danger secondary" style={{ padding: '0.2rem 0.5rem' }} onClick={() => handleRemoveItem(idx)}>✕</button>
                   </td>
                 </tr>
               ))}

@@ -321,11 +321,14 @@ func itemsHandler(w http.ResponseWriter, r *http.Request) {
 		var i models.ItemMaster
 		err := json.NewDecoder(r.Body).Decode(&i)
 		if err != nil {
-			fmt.Println("Decode Error (Items):", err)
+			if serverLogger != nil { serverLogger.Printf("Item Decode Error: %v", err) }
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
 		}
-		err = procureUC.SaveItem(&i)
-		if err != nil {
-			fmt.Println("Save Error (Items):", err)
+		if err := procureUC.SaveItem(&i); err != nil {
+			if serverLogger != nil { serverLogger.Printf("Item Save Error: %v", err) }
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
 		}
 		w.WriteHeader(http.StatusOK)
 	}
@@ -381,6 +384,65 @@ func poAllocationWarningHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	json.NewEncoder(w).Encode(warning)
+}
+
+func poEditLockHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	poIDStr := r.URL.Query().Get("poId")
+	var poID int
+	fmt.Sscanf(poIDStr, "%d", &poID)
+	hasAP, hasCI, err := procureUC.GetPOReferenceStatus(poID)
+	if err != nil {
+		if serverLogger != nil { serverLogger.Printf("PO Edit Lock Error: %v", err) }
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"locked":             hasAP || hasCI,
+		"has_ap":             hasAP,
+		"has_container_item": hasCI,
+	})
+}
+
+func poItemAdjustmentsHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method == http.MethodGet {
+		poIDStr := r.URL.Query().Get("poId")
+		if poIDStr != "" {
+			var poID int
+			fmt.Sscanf(poIDStr, "%d", &poID)
+			list, _ := procureUC.GetPOItemAdjustmentsByPOID(poID)
+			json.NewEncoder(w).Encode(list)
+			return
+		}
+		poItemIDStr := r.URL.Query().Get("poItemId")
+		var poItemID int
+		fmt.Sscanf(poItemIDStr, "%d", &poItemID)
+		list, _ := procureUC.GetPOItemAdjustmentsByPOItemID(poItemID)
+		json.NewEncoder(w).Encode(list)
+	} else if r.Method == http.MethodPost {
+		var a models.POItemAdjustment
+		if err := json.NewDecoder(r.Body).Decode(&a); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		var err error
+		if a.Kind == "PRICE" {
+			err = procureUC.AdjustPOItemPrice(&a)
+		} else {
+			err = procureUC.AdjustPOItemQty(&a)
+		}
+		if err != nil {
+			if serverLogger != nil { serverLogger.Printf("PO Item Adjust Error: %v", err) }
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		json.NewEncoder(w).Encode(a)
+	}
 }
 
 func poItemsHandler(w http.ResponseWriter, r *http.Request) {
@@ -762,6 +824,137 @@ func apTargetGroupsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func constraintProfilesHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method == http.MethodGet {
+		list, err := procureUC.GetConstraintProfiles()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(list)
+	} else if r.Method == http.MethodPost {
+		var p models.ConstraintProfile
+		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if err := procureUC.SaveConstraintProfile(&p); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(p)
+	}
+}
+
+func constraintsHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method == http.MethodGet {
+		list, err := procureUC.GetConstraints()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(list)
+	} else if r.Method == http.MethodPost {
+		var c models.ConstraintMaster
+		if err := json.NewDecoder(r.Body).Decode(&c); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if err := procureUC.SaveConstraintMaster(&c); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(c)
+	}
+}
+
+func constraintAvailabilityHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	ciStr := r.URL.Query().Get("containerItemId")
+	var ciID int
+	fmt.Sscanf(ciStr, "%d", &ciID)
+	res, err := procureUC.ComputeConstraintAvailability(ciID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	json.NewEncoder(w).Encode(res)
+}
+
+func constraintInstancesHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	switch r.Method {
+	case http.MethodGet:
+		var lotID int
+		fmt.Sscanf(r.URL.Query().Get("lotId"), "%d", &lotID)
+		list, err := procureUC.GetConstraintInstances(lotID)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(list)
+	case http.MethodPost:
+		var inst models.ConstraintInstance
+		if err := json.NewDecoder(r.Body).Decode(&inst); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if err := procureUC.SaveConstraintInstance(&inst); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(inst)
+	case http.MethodDelete:
+		var id int
+		fmt.Sscanf(r.URL.Query().Get("id"), "%d", &id)
+		if err := procureUC.DeleteConstraintInstance(id); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	}
+}
+
+func constraintScheduleHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	var lotID int
+	fmt.Sscanf(r.URL.Query().Get("lotId"), "%d", &lotID)
+	sched, err := procureUC.GetLotConstraintSchedule(lotID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	json.NewEncoder(w).Encode(sched)
+}
+
+func constraintBulkAppendHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var body struct {
+		ContainerItemID int    `json:"container_item_id"`
+		ConstraintType  string `json:"constraint_type"`
+		LeadTimeDays    int    `json:"lead_time_days"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := procureUC.BulkAppendConstraintToShipment(body.ContainerItemID, body.ConstraintType, body.LeadTimeDays); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
 func apTargetGroupItemsHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if r.Method == http.MethodGet {
@@ -807,6 +1000,23 @@ func apTargetGroupReferencesHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		json.NewEncoder(w).Encode(list)
 	}
+}
+
+func referenceNoHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	refType := r.URL.Query().Get("type")
+	uuid := r.URL.Query().Get("uuid")
+	no := ""
+	if refType != "" && uuid != "" {
+		if v, err := procureUC.GetReferenceNoByUUID(refType, uuid); err == nil {
+			no = v
+		}
+	}
+	json.NewEncoder(w).Encode(map[string]string{"reference_no": no})
 }
 
 func todosHandler(w http.ResponseWriter, r *http.Request) {
@@ -855,7 +1065,9 @@ func main() {
 	mux.HandleFunc("/api/vendors", corsMiddleware(authMiddleware(vendorsHandler)))
 	mux.HandleFunc("/api/pos", corsMiddleware(authMiddleware(posHandler)))
 	mux.HandleFunc("/api/pos/allocation-warning", corsMiddleware(authMiddleware(poAllocationWarningHandler)))
+	mux.HandleFunc("/api/pos/edit-lock", corsMiddleware(authMiddleware(poEditLockHandler)))
 	mux.HandleFunc("/api/pos/items", corsMiddleware(authMiddleware(poItemsHandler)))
+	mux.HandleFunc("/api/po-item-adjustments", corsMiddleware(authMiddleware(poItemAdjustmentsHandler)))
 	mux.HandleFunc("/api/invoices", corsMiddleware(authMiddleware(invoicesHandler)))
 	mux.HandleFunc("/api/invoices/items", corsMiddleware(authMiddleware(invoiceItemsHandler)))
 	mux.HandleFunc("/api/aps", corsMiddleware(authMiddleware(apsHandler)))
@@ -877,8 +1089,15 @@ func main() {
 	mux.HandleFunc("/api/references", corsMiddleware(authMiddleware(checkReferencesHandler)))
 	mux.HandleFunc("/api/delete", corsMiddleware(authMiddleware(deleteRecordHandler)))
 	mux.HandleFunc("/api/ap-target-groups", corsMiddleware(authMiddleware(apTargetGroupsHandler)))
+	mux.HandleFunc("/api/constraint-profiles", corsMiddleware(authMiddleware(constraintProfilesHandler)))
+	mux.HandleFunc("/api/constraints", corsMiddleware(authMiddleware(constraintsHandler)))
+	mux.HandleFunc("/api/constraint-availability", corsMiddleware(authMiddleware(constraintAvailabilityHandler)))
+	mux.HandleFunc("/api/constraint-instances", corsMiddleware(authMiddleware(constraintInstancesHandler)))
+	mux.HandleFunc("/api/constraint-schedule", corsMiddleware(authMiddleware(constraintScheduleHandler)))
+	mux.HandleFunc("/api/constraint-bulk-append", corsMiddleware(authMiddleware(constraintBulkAppendHandler)))
 	mux.HandleFunc("/api/ap-target-groups/items", corsMiddleware(authMiddleware(apTargetGroupItemsHandler)))
 	mux.HandleFunc("/api/ap-target-groups/references", corsMiddleware(authMiddleware(apTargetGroupReferencesHandler)))
+	mux.HandleFunc("/api/reference-no", corsMiddleware(authMiddleware(referenceNoHandler)))
 	mux.HandleFunc("/api/todos", corsMiddleware(authMiddleware(todosHandler)))
 	mux.HandleFunc("/api/todos/toggle", corsMiddleware(authMiddleware(toggleTodoHandler)))
 	mux.HandleFunc("/api/todos/delete", corsMiddleware(authMiddleware(deleteTodoHandler)))

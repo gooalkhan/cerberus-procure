@@ -21,6 +21,7 @@ export interface Column {
   fullWidth?: boolean;
   searchType?: string;
   divider?: boolean;
+  readOnly?: (item: any) => boolean;
 }
 
 interface CrudPageProps<T> {
@@ -127,7 +128,12 @@ function CrudPage<T extends { [key: string]: any }>({ title, columns, fetchData,
 
   const handleSave = async () => {
     if (selectedItem) {
-      await onSave(selectedItem);
+      try {
+        await onSave(selectedItem);
+      } catch (err: any) {
+        alert(`저장 실패: ${err?.message || err}`);
+        return;
+      }
       alert('저장되었습니다.');
       setIsModalOpen(false);
       loadData();
@@ -395,10 +401,24 @@ function CrudPage<T extends { [key: string]: any }>({ title, columns, fetchData,
                 if (col.divider) {
                   return <div key={col.key} style={{ gridColumn: 'span 3', borderTop: '1px solid var(--border-color)', margin: '1rem 0', opacity: 0.3 }}></div>;
                 }
+                const colReadOnly = col.readOnly ? col.readOnly(selectedItem) : false;
                 return (
                   <div key={col.key} className={`form-group ${col.fullWidth ? 'full-width' : ''}`}>
                     <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                       {col.label}
+                      {colReadOnly && (
+                        <span style={{
+                          fontSize: '0.65rem',
+                          background: '#f97316',
+                          color: 'white',
+                          padding: '2px 6px',
+                          borderRadius: '4px',
+                          textTransform: 'uppercase',
+                          fontWeight: 'bold'
+                        }}>
+                          locked
+                        </span>
+                      )}
                       {col.searchType && (
                         <span
                           style={{
@@ -420,6 +440,7 @@ function CrudPage<T extends { [key: string]: any }>({ title, columns, fetchData,
                     {col.type === 'select' ? (
                       <select
                         value={selectedItem[col.key] || ''}
+                        disabled={colReadOnly}
                         onChange={async (e) => {
                           const val = e.target.value;
                           let updatedItem = { ...selectedItem, [col.key]: val };
@@ -440,6 +461,8 @@ function CrudPage<T extends { [key: string]: any }>({ title, columns, fetchData,
                       <input
                         type={col.type === 'number' ? 'text' : col.type || 'text'}
                         inputMode={col.type === 'number' ? 'decimal' : undefined}
+                        disabled={colReadOnly}
+                        style={colReadOnly ? { opacity: 0.6, cursor: 'not-allowed' } : undefined}
                         value={col.type === 'date' && selectedItem[col.key]
                           ? new Date(selectedItem[col.key]).toISOString().split('T')[0]
                           : selectedItem[col.key] ?? ''}
@@ -604,6 +627,7 @@ function CrudPage<T extends { [key: string]: any }>({ title, columns, fetchData,
                 case 'GR': return item.gr_id;
                 case 'Lot': return item.lot_id;
                 case 'Container Item': return item.container_item_id;
+                case 'Constraint Profile': return item.constraint_profile_id;
                 default: return item.id || item.vendor_id || item.po_id || item.ci_id || item.container_id || item.bl_id;
               }
             };

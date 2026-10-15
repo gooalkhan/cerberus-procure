@@ -6,18 +6,24 @@ import (
 
 // ItemMaster 아이템 기본 속성
 type ItemMaster struct {
-	ID          int       `json:"item_id"`
-	SKUCode     string    `json:"sku_code"`
-	Name        string    `json:"name"`
-	VendorID    int       `json:"vendor_id"`
-	CBM         float64   `json:"cbm"`
-	NetWeight   float64   `json:"net_weight"`
-	GrossWeight float64   `json:"gross_weight"`
-	Remark      string    `json:"remark"`
-	CreatedBy   string    `json:"created_by"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedBy   string    `json:"updated_by"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID             int       `json:"item_id"`
+	SKUCode        string    `json:"sku_code"`
+	Name           string    `json:"name"`
+	VendorID       int       `json:"vendor_id"`
+	DefaultConstraintProfileID int `json:"default_constraint_profile_id"` // 기본 행정 제약 프로파일
+	CBM            float64   `json:"cbm"`
+	BoxQty         int       `json:"box_qty"`          // 박스 입수 (박스당 수량)
+	BoxesPerPallet int       `json:"boxes_per_pallet"` // 팔렛당 박스 적재량
+	BoxWidth       float64   `json:"box_width"`        // 박스 가로 (cm)
+	BoxLength      float64   `json:"box_length"`       // 박스 세로 (cm)
+	BoxHeight      float64   `json:"box_height"`       // 박스 높이 (cm)
+	NetWeight      float64   `json:"net_weight"`
+	GrossWeight    float64   `json:"gross_weight"`
+	Remark         string    `json:"remark"`
+	CreatedBy      string    `json:"created_by"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedBy      string    `json:"updated_by"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 // VendorMaster 협력사 정보
@@ -57,7 +63,8 @@ type POItem struct {
 	ID        int       `json:"po_item_id"`
 	POID      int       `json:"po_id"`
 	ItemID    int       `json:"item_id"`
-	POQty     float64   `json:"po_qty"`
+	BaseQty   float64   `json:"base_qty"` // 최초 등록 기준 수량 (불변)
+	POQty     float64   `json:"po_qty"`   // 현행 수량 (Base + Σ증분)
 	UnitPrice float64   `json:"unit_price"`
 	Status    string    `json:"status"`
 	Remark    string    `json:"remark"`
@@ -65,6 +72,19 @@ type POItem struct {
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedBy string    `json:"updated_by"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// POItemAdjustment PO 품목 변경 이력 (수량 증분 / 단가 변경)
+type POItemAdjustment struct {
+	ID        int       `json:"adjustment_id"`
+	POItemID  int       `json:"po_item_id"`
+	Kind      string    `json:"kind"`      // QTY | PRICE
+	QtyDelta  float64   `json:"qty_delta"` // Kind=QTY
+	OldValue  float64   `json:"old_value"`
+	NewValue  float64   `json:"new_value"`
+	Reason    string    `json:"reason"`
+	CreatedBy string    `json:"created_by"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // CommercialInvoice 상업 송장 기본 정보
@@ -101,7 +121,7 @@ type AccountPayable struct {
 	Amount           float64   `json:"amount"`
 	Currency         string    `json:"currency"`
 	LocalAmount      float64   `json:"local_amount"`
-	AllocationType   string    `json:"allocation_type"` // Weight, Volume, Quantity, Value, Unit
+	AllocationType   string    `json:"allocation_type"` // Weight, Volume, Quantity, Value, Row
 	ReferenceUUID    string    `json:"reference_uuid"`
 	ReferenceType    string    `json:"reference_type"` // BL, Container, PO, CI, GR, Lot, ContainerItem
 	DueDate          time.Time `json:"due_date"`
@@ -114,6 +134,7 @@ type AccountPayable struct {
 	UpdatedBy        string    `json:"updated_by"`
 	UpdatedAt        time.Time `json:"updated_at"`
 	UUID             string    `json:"uuid"`
+	HasAllocation    bool      `json:"has_allocation"`
 }
 
 // Container 운송 단위 정보
@@ -135,6 +156,7 @@ type ContainerItem struct {
 	ContainerID int     `json:"container_id"`
 	CIID        int     `json:"ci_id"`
 	BLID        int     `json:"bl_id"`
+	ConstraintProfileID int `json:"constraint_profile_id"` // 선택된 행정 제약 프로파일(기본값: SKU)
 	LoadQty     float64 `json:"load_qty"`
 	GrossWeight float64 `json:"gross_weight"`
 	NetWeight   float64 `json:"net_weight"`
@@ -162,6 +184,7 @@ type BL struct {
 // GoodsReceipt 입고 기록
 type GoodsReceipt struct {
 	ID          int       `json:"gr_id"`
+	GRNo        string    `json:"gr_no"`
 	ReceiveDate time.Time `json:"receive_date"`
 	Remark      string    `json:"remark"`
 	CreatedBy   string    `json:"created_by"`
@@ -304,6 +327,8 @@ type BookingView struct {
 	GrossWeight     float64   `json:"gross_weight"`
 	NetWeight       float64   `json:"net_weight"`
 	CBM             float64   `json:"cbm"`
+	MasterCBM       float64   `json:"master_cbm"`
+	UnitCBM         float64   `json:"unit_cbm"`
 	TemporaryETA    time.Time `json:"temporary_eta"`
 	Remark          string    `json:"remark"`
 }

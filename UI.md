@@ -90,13 +90,13 @@ Most modules utilize the `CrudPage` component, which provides a standardized wor
 
 ### 💰 AP Allocation Settings
 - Advanced settings for financial reconciliation.
-- Supports selection of allocation basis (Weight, Volume, Quantity, Value, Unit) and polymorphic references.
+- Supports selection of allocation basis (Weight, Volume, Quantity, Value, Row) and polymorphic references.
 - AP Allocation can be done on a single lot, which is the minimal unit of AP allocation. User can use CI, BL, Container, GR, Lot as a reference of batch import of its lots.
 
 ### AP Association
 - AP can be associated with PO, CI, BL, Container, Container_Item, GR, Lot, or **AP Target Group**. User must explicitly specify the association. the association is based on UUID which is given to the target of the AP linkage.
 - **AP Target Group**: A dedicated interface allows users to group **multiple documents of the same type** (multiple POs, multiple CIs, multiple BLs, multiple Containers, multiple Container_Items, multiple GRs, or multiple Lots) into a single logical AP target with its own UUID. The group is defined by a selected `Reference_Type`, and only references of that type can be added. This grouped UUID can then be selected when issuing a single AP that covers multiple underlying documents of the same kind. The group detail view lists all grouped references and their allocated amounts.
-- Whenever the target is deleted, the System will warn the user that the AP will be orphaned after the deletion. A revision to PO, CI, BL, Container does not effect its given UUID, but a revision to Container_Item, Lot will effect its given UUID. So the System should warn the user that the AP will be orphaned after the revision.
+- Whenever the target is deleted, the System will block the deletion and list the APs that reference it (the AP would otherwise be orphaned). A revision (edit) to PO, CI, BL, Container, Container_Item, Lot does not change its UUID; UUIDs remain stable across quantity changes because Cost Allocation records amounts per Lot (snapshot) and recomputes proportions from current base values.
 
 ### Shipment Tracking Monitor
 - User can see whole shipments that are not closed. Shipments are divided into stages(POed, loaded, shipped, discharged). User can see the overall progress of each shipment by week or by month.
@@ -109,3 +109,114 @@ Most modules utilize the `CrudPage` component, which provides a standardized wor
 - **Responsive Modals**: Large forms are organized into grids and are scrollable to fit various screen sizes.
 - **Interactive Feedback**: Hover states on table rows, smooth transitions on modal opening, and color-coded status badges (e.g., 'Paid', 'Open').
 - **Authentication Flow**: A clean, centralized login screen with session management and user profile persistence.
+
+## 6. Administrative Constraint UI (Constraint Profile & Instance Chain)
+
+Implements the model defined in `BUSINESS_LOGIC.md` §4–§5: administrative procedures (요건승인 / 검역 / 통관 …) are governed by a **SKU-level profile** (rule), selected per shipment, and **cloned per `Lot` at GR** (instance) where start/end dates cascade into the **Cost Allocation Ready date**.
+
+> Note: this section is the **frontend change plan** (what to add/change). Backend endpoints and WASM bindings must be added in parallel; the frontend talks to them only through `procureApi.ts`.
+
+### 6.1 Navigation Changes
+
+* Add a sidebar item **⚙️ Constraint Profiles** (`constraint_profiles`) under a "Master Data" group.
+* (Optional) **🧬 Constraint Types** catalog (요건승인/검역/통관/불시검문검사 + default lead time).
+
+### 6.2 New Screen: Constraint Profile Manager
+
+Standard `CrudPage` list (Profile No, Name, Step count) with a detail modal editing the profile and its ordered steps.
+
+```
+Constraint Profile
+┌────────────────────────────────────────────────────────────────┐
+│ Name: [식품 표준                ]   Remark: [................. ] │
+├────┬────────────────┬──────────────┬──────────┬───────────────┤
+│ #  │ Type           │ Lead (days)  │ Optional │ Actions       │
+├────┼────────────────┼──────────────┼──────────┼───────────────┤
+│ 1  │ 요건승인        │ [ 3 ]        │ [ ]      │ ▲ ▼ ✕         │
+│ 2  │ 검역           │ [ 2 ]        │ [ ]      │ ▲ ▼ ✕         │
+│ 3  │ 통관           │ [ 4 ]        │ [ ]      │ ▲ ▼ ✕         │
+│ 4  │ 불시검문검사     │ [ 0 ]        │ [x]      │ ▲ ▼ ✕         │
+└────┴────────────────┴──────────────┴──────────┴───────────────┘
+[+ Add Step]                                    [Cancel]  [Save Profile]
+```
+
+* Row **▲ ▼** = reorder, **✕** = remove, `+ Add Step` = append.
+* `Optional` steps are pre-declared but not instantiated until enabled (§5.9).
+
+### 6.3 Item Master (change)
+
+* Add `default_constraint_profile_id` (select) to the form/columns.
+* Display the profile **name** in the table.
+
+```
+Item Master  ·  edit
+┌──────────────────────────────────────────────────────────┐
+│ SKU Code: [ITEM-001]   Name: [Premium Coffee Beans]       │
+│ Vendor: [Global Trading Co.]                              │
+│ Default Constraint Profile: [식품 표준 ▾]                 │
+│ … packaging fields …                                      │
+└──────────────────────────────────────────────────────────┘
+```
+
+### 6.4 Bookings / Container_Item (change)
+
+* Add `constraint_profile_id` select, **auto-filled from the SKU default**, overridable.
+* Show a read-only **projected** availability from `Temporary_ETA` (no persistence, §5.4).
+
+```
+Container_Item  ·  edit
+┌──────────────────────────────────────────────────────────────┐
+│ PO Item: VT260410 / ITEM-001     Load Qty: [ 100 ]            │
+│ Temporary ETA: [2026-02-01]                                   │
+│ Constraint Profile: [식품 표준 ▾]   (SKU default — overridable)│
+│ ─────────────────────────────────────────────────────────────│
+│ ▶ Expected Cost Allocation Ready: 2026-02-11   (projected)    │
+└──────────────────────────────────────────────────────────────┘
+```
+
+### 6.5 Landed Goods (GR + Lot) — main change
+
+Inside `LandedGoodsDetail`, add a **per-Lot constraint chain editor**. Instances are cloned from the shipment profile at GR/Lot creation.
+
+```
+Lot: LOT-COFFEE-001   (GR-0001 / ITEM-001)
+┌────┬────────────────┬──────────────┬──────────────┬───────────────┐
+│ #  │ Constraint     │ Start        │ End          │ Actions       │
+├────┼────────────────┼──────────────┼──────────────┼───────────────┤
+│ 1  │ 요건승인        │ [2026-02-02] │ [2026-02-05] │ ▲ ▼ ✕  [+ ins]│
+│ 2  │ 검역           │ [2026-02-05] │ (lead 2d)    │ ▲ ▼ ✕  [+ ins]│
+│ 3  │ 통관           │ (auto)       │ (auto)       │ ▲ ▼ ✕         │
+└────┴────────────────┴──────────────┴──────────────┴───────────────┘
+[ Enable optional: 불시검문검사 ]   [ Apply to all Lots of this shipment ]
+▶ Cost Allocation Ready: 2026-02-11  (actual)     Status: In Progress
+```
+
+* **Insert between steps** = the `[+ ins]` action (relink, §5.8.1).
+* **Reorder** = ▲ ▼; **Remove** = ✕ (§5.8.2/5.8.3).
+* Editing **Start** or **End** triggers **cascade**; downstream auto dates refresh immediately.
+* **Optional enable** adds an `Is_Optional` step to this Lot's chain.
+* **Apply to all Lots of this shipment** = bulk edit keyed by `Source_Container_Item_ID` (§5.8.5).
+* Display per-Lot **Cost Allocation Ready** (projected vs actual) with an `AvailabilityBadge`.
+
+### 6.6 Cost Allocations (optional change)
+
+* Show a **gate/warning** when a lot's Cost Allocation Ready date has not been reached.
+
+### 6.7 Reusable Components
+
+| Component | Purpose |
+| :--- | :--- |
+| `ConstraintChainEditor` | Step list + insert/delete/reorder + cascade; shared by Lot editor and Container_Item **preview** |
+| `AvailabilityBadge` | Renders `Pending / In Progress / Ready` with projected-vs-actual styling |
+
+### 6.8 Frontend Model & API Additions
+
+* **`models.ts`**: `ConstraintProfile`, `ConstraintProfileStep`, `ConstraintInstance`; `ItemMaster.default_constraint_profile_id`; `ContainerItem.constraint_profile_id`; lot availability field.
+* **`procureApi.ts`**: profile CRUD, instance CRUD (`getConstraintInstances(lotId)`, save/delete, insert/reorder), `bulkApplyConstraints`, `getExpectedAvailability`.
+* **Server + WASM**: matching endpoints/bindings (transparent to the frontend via `procureApi`).
+
+### 6.9 Phased Rollout
+
+1. **Projection**: Constraint Profile Manager (§6.2) + Item Master (§6.3) + Bookings profile select & projected availability (§6.4). No instance persistence.
+2. **Instance**: Landed Goods per-Lot chain editor + cascade (§6.5) + reusable components (§6.7) + bulk edit.
+3. **Gate**: Cost Allocation availability gate (§6.6).

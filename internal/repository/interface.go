@@ -36,8 +36,15 @@ type ProcurementRepository interface {
 
 	// PO Item
 	GetPOItemsByPOID(poID int) ([]models.POItem, error)
+	GetPOItemByID(id int) (*models.POItem, error)
+	GetPOItemByBucket(poID int, itemID int, unitPrice float64) (*models.POItem, error)
+	GetPOLoadQty(poItemID int) (float64, error)
 	SavePOItem(item *models.POItem) error
 	DeletePOItem(id int) error
+	SavePOItemAdjustment(a *models.POItemAdjustment) error
+	GetPOItemAdjustmentsByPOItemID(poItemID int) ([]models.POItemAdjustment, error)
+	GetPOItemAdjustmentsByPOID(poID int) ([]models.POItemAdjustment, error)
+	GetPOReferenceStatus(poID int) (hasAP bool, hasContainerItem bool, err error)
 
 	// Commercial Invoice
 	GetCommercialInvoices() ([]models.CommercialInvoice, error)
@@ -46,23 +53,29 @@ type ProcurementRepository interface {
 
 	// Account Payable
 	GetAccountPayables() ([]models.AccountPayable, error)
+	GetAccountPayableByID(id int) (*models.AccountPayable, error)
+	GetAPAllocatedAmount(apID int) (hasAny bool, total float64, err error)
 	SaveAccountPayable(ap *models.AccountPayable) error
 
 	// Container & Logistics
 	GetContainers() ([]models.Container, error)
+	GetContainerByID(id int) (*models.Container, error)
 	SaveContainer(c *models.Container) error
 	GetBLs() ([]models.BL, error)
 	SaveBL(bl *models.BL) error
 
 	// Goods Receipt & Inventory
 	GetGoodsReceipts() ([]models.GoodsReceipt, error)
+	GetGoodsReceiptByID(id int) (*models.GoodsReceipt, error)
 	SaveGoodsReceipt(gr *models.GoodsReceipt) error
 	GetInventoryLots() ([]models.InventoryLot, error)
+	GetInventoryLotByID(id int) (*models.InventoryLot, error)
 	GetInventoryLotsByGRID(grID int) ([]models.InventoryLot, error)
 	SaveInventoryLot(lot *models.InventoryLot) error
 
 	// Container Items
 	GetContainerItemsByContainerID(containerID int) ([]models.ContainerItem, error)
+	GetContainerItemByID(id int) (*models.ContainerItem, error)
 	GetContainersByBLID(blID int) ([]models.Container, error)
 	SaveContainerItem(item *models.ContainerItem) error
 
@@ -73,6 +86,7 @@ type ProcurementRepository interface {
 	// Cost Allocation Items
 	GetCostAllocationItemsByAllocationID(caID int) ([]models.CostAllocationItem, error)
 	SaveCostAllocationItem(item *models.CostAllocationItem) error
+	DeleteCostAllocationItem(id int) error
 
 	// Cost Allocation Helpers
 	GetAvailableCostAllocationLots() ([]models.CostAllocationLotCandidate, error)
@@ -80,8 +94,10 @@ type ProcurementRepository interface {
 	GetAllCostAllocationLotCandidates() ([]models.CostAllocationLotCandidate, error)
 	GetCostAllocationReferenceBaseUnits(refType string, refID int) ([]models.CostAllocationBaseUnit, error)
 	GetAPIDsUsedForLots(lotIDs []int) (map[int]bool, error)
-	GetCostAllocationSummaryByAP(apID int) (totalAmount float64, lotIDs []int, err error)
 	GetCostAllocationWarningByPO(poID int) (*models.POAllocationWarning, error)
+	GetReferenceIDByUUID(refType string, uuid string) (int, error)
+	GetReferenceNoByUUID(refType string, uuid string) (string, error)
+	GetCostAllocationAmountsByAP(apID int) (map[int]float64, error)
 
 	// Unified Views
 	GetBookings() ([]models.BookingView, error)
@@ -101,4 +117,22 @@ type ProcurementRepository interface {
 	SaveAPTargetGroupItem(item *models.AP_TargetGroupItem) error
 	DeleteAPTargetGroupItem(id int) error
 	GetAllReferenceTargets() ([]models.APTargetGroupReference, error)
+
+	// Constraint Profile (행정 제약 프로파일)
+	GetConstraintProfiles() ([]models.ConstraintProfile, error)
+	GetConstraintProfileByID(id int) (*models.ConstraintProfile, error)
+	GetConstraintProfileSteps(profileID int) ([]models.ConstraintProfileStep, error)
+	SaveConstraintProfile(p *models.ConstraintProfile) error
+	SaveConstraintProfileStep(s *models.ConstraintProfileStep) error
+	DeleteConstraintProfileStep(id int) error
+
+	// Constraint Master (개별 제약 카탈로그)
+	GetConstraints() ([]models.ConstraintMaster, error)
+	GetConstraintMasterByID(id int) (*models.ConstraintMaster, error)
+	SaveConstraintMaster(c *models.ConstraintMaster) error
+
+	// Constraint Instance (Lot별 행정 제약 인스턴스)
+	GetConstraintInstances(lotID int) ([]models.ConstraintInstance, error)
+	SaveConstraintInstance(inst *models.ConstraintInstance) error
+	DeleteConstraintInstance(id int) error
 }

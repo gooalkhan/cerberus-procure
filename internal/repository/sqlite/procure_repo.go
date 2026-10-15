@@ -36,6 +36,11 @@ func migrateProcurement(db *sql.DB) error {
 			Name TEXT NOT NULL,
 			Vendor_ID INTEGER NOT NULL,
 			CBM REAL CHECK (CBM >= 0),
+			Box_Qty INTEGER NOT NULL DEFAULT 1,
+			Boxes_Per_Pallet INTEGER,
+			Box_Width REAL,
+			Box_Length REAL,
+			Box_Height REAL,
 			Net_Weight REAL CHECK (Net_Weight >= 0),
 			Gross_Weight REAL CHECK (Gross_Weight >= 0),
 			Remark TEXT,
@@ -77,9 +82,10 @@ func migrateProcurement(db *sql.DB) error {
 			PO_Item_ID INTEGER PRIMARY KEY AUTOINCREMENT,
 			PO_ID INTEGER NOT NULL,
 			Item_ID INTEGER NOT NULL,
-			PO_Qty REAL CHECK (PO_Qty > 0),
+			Base_Qty REAL,
+			PO_Qty REAL CHECK (PO_Qty >= 0),
 			Unit_Price REAL NOT NULL,
-			Status TEXT CHECK (Status IN ('Shipped', 'Partially Shipped', 'Not Shipped', 'Cancelled')) DEFAULT 'Not Shipped',
+			Status TEXT CHECK (Status IN ('Shipped', 'Partially Shipped', 'Over Shipped', 'Not Shipped')) DEFAULT 'Not Shipped',
 			Remark TEXT,
 			Created_By TEXT,
 			Created_At DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -87,6 +93,18 @@ func migrateProcurement(db *sql.DB) error {
 			Updated_At DATETIME DEFAULT CURRENT_TIMESTAMP,
 			FOREIGN KEY (PO_ID) REFERENCES Purchase_Order(PO_ID),
 			FOREIGN KEY (Item_ID) REFERENCES Item_Master(Item_ID)
+		)`,
+		`CREATE TABLE IF NOT EXISTS PO_Item_Adjustment (
+			Adjustment_ID INTEGER PRIMARY KEY AUTOINCREMENT,
+			PO_Item_ID INTEGER NOT NULL,
+			Kind TEXT NOT NULL DEFAULT 'QTY',
+			Qty_Delta REAL,
+			Old_Value REAL,
+			New_Value REAL,
+			Reason TEXT,
+			Created_By TEXT,
+			Created_At DATETIME DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (PO_Item_ID) REFERENCES PO_Item(PO_Item_ID)
 		)`,
 		`CREATE TABLE IF NOT EXISTS Commercial_Invoice (
 			CI_ID INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -111,7 +129,7 @@ func migrateProcurement(db *sql.DB) error {
 			Amount REAL NOT NULL,
 			Currency TEXT NOT NULL,
 			Local_Amount REAL,
-			Allocation_Type TEXT CHECK (Allocation_Type IN ('Weight', 'Volume', 'Quantity', 'Value', 'Unit')),
+			Allocation_Type TEXT CHECK (Allocation_Type IN ('Weight', 'Volume', 'Quantity', 'Value', 'Row')),
 			Reference_UUID TEXT,
 			Reference_Type TEXT,
 			Due_Date DATETIME,
@@ -170,6 +188,7 @@ func migrateProcurement(db *sql.DB) error {
 		)`,
 		`CREATE TABLE IF NOT EXISTS Goods_Receipt (
 			GR_ID INTEGER PRIMARY KEY AUTOINCREMENT,
+			GR_No TEXT,
 			Receive_Date DATETIME NOT NULL,
 			Remark TEXT,
 			Created_By TEXT,
@@ -231,144 +250,59 @@ func migrateProcurement(db *sql.DB) error {
 			Remark TEXT,
 			FOREIGN KEY (Group_ID) REFERENCES AP_Target_Group(Group_ID) ON DELETE CASCADE
 		)`,
-		`CREATE TRIGGER IF NOT EXISTS trg_sync_po_status AFTER UPDATE OF Status ON PO_Item
-		BEGIN
-			-- Close PO if all items are Shipped or Cancelled
-			UPDATE Purchase_Order
-			SET Status = 'Closed'
-			WHERE PO_ID = NEW.PO_ID
-			  AND NOT EXISTS (
-				  SELECT 1 FROM PO_Item
-				  WHERE PO_ID = NEW.PO_ID
-					AND Status NOT IN ('Shipped', 'Cancelled')
-			  );
-			
-			-- Reopen PO if any item is Not Shipped or Partially Shipped
-			UPDATE Purchase_Order
-			SET Status = 'Open'
-			WHERE PO_ID = NEW.PO_ID
-			  AND EXISTS (
-				  SELECT 1 FROM PO_Item
-				  WHERE PO_ID = NEW.PO_ID
-					AND Status NOT IN ('Shipped', 'Cancelled')
-			  );
-		END;`,
-		`CREATE TRIGGER IF NOT EXISTS trg_sync_po_status_delete AFTER DELETE ON PO_Item
-		BEGIN
-			-- Close PO if all remaining items are Shipped or Cancelled
-			UPDATE Purchase_Order
-			SET Status = 'Closed'
-			WHERE PO_ID = OLD.PO_ID
-			  AND NOT EXISTS (
-				  SELECT 1 FROM PO_Item
-				  WHERE PO_ID = OLD.PO_ID
-					AND Status NOT IN ('Shipped', 'Cancelled')
-			  )
-			  AND EXISTS (SELECT 1 FROM PO_Item WHERE PO_ID = OLD.PO_ID);
-			
-			-- Reopen PO if any remaining item is Not Shipped or Partially Shipped
-			UPDATE Purchase_Order
-			SET Status = 'Open'
-			WHERE PO_ID = OLD.PO_ID
-			  AND EXISTS (
-				  SELECT 1 FROM PO_Item
-				  WHERE PO_ID = OLD.PO_ID
-					AND Status NOT IN ('Shipped', 'Cancelled')
-			  );
-		END;`,
-		`CREATE TRIGGER IF NOT EXISTS trg_container_item_calc_insert
-		AFTER INSERT ON Container_Item
-		BEGIN
-			-- 1. Calculate item fields
-			UPDATE Container_Item
-			SET 
-				Gross_Weight = (SELECT Gross_Weight FROM Item_Master im JOIN PO_Item pi ON im.Item_ID = pi.Item_ID WHERE pi.PO_Item_ID = NEW.PO_Item_ID) * NEW.Load_Qty,
-				Net_Weight = (SELECT Net_Weight FROM Item_Master im JOIN PO_Item pi ON im.Item_ID = pi.Item_ID WHERE pi.PO_Item_ID = NEW.PO_Item_ID) * NEW.Load_Qty,
-				Cbm = (SELECT CBM FROM Item_Master im JOIN PO_Item pi ON im.Item_ID = pi.Item_ID WHERE pi.PO_Item_ID = NEW.PO_Item_ID) * NEW.Load_Qty
-			WHERE Container_Item_ID = NEW.Container_Item_ID;
-
-			-- 2. Aggregate to Container
-			UPDATE Container
-			SET Total_CBM = (SELECT SUM(Cbm) FROM Container_Item WHERE Container_ID = NEW.Container_ID),
-				Total_Net_Wgt = (SELECT SUM(Net_Weight) FROM Container_Item WHERE Container_ID = NEW.Container_ID),
-				Total_Gross_Wgt = (SELECT SUM(Gross_Weight) FROM Container_Item WHERE Container_ID = NEW.Container_ID)
-			WHERE Container_ID = NEW.Container_ID;
-		END;`,
-		`CREATE TRIGGER IF NOT EXISTS trg_container_item_calc_update
-		AFTER UPDATE ON Container_Item
-		BEGIN
-			-- 1. Calculate item fields
-			UPDATE Container_Item
-			SET 
-				Gross_Weight = (SELECT Gross_Weight FROM Item_Master im JOIN PO_Item pi ON im.Item_ID = pi.Item_ID WHERE pi.PO_Item_ID = NEW.PO_Item_ID) * NEW.Load_Qty,
-				Net_Weight = (SELECT Net_Weight FROM Item_Master im JOIN PO_Item pi ON im.Item_ID = pi.Item_ID WHERE pi.PO_Item_ID = NEW.PO_Item_ID) * NEW.Load_Qty,
-				Cbm = (SELECT CBM FROM Item_Master im JOIN PO_Item pi ON im.Item_ID = pi.Item_ID WHERE pi.PO_Item_ID = NEW.PO_Item_ID) * NEW.Load_Qty
-			WHERE Container_Item_ID = NEW.Container_Item_ID;
-
-			-- 2. Aggregate to NEW Container
-			UPDATE Container
-			SET Total_CBM = (SELECT SUM(Cbm) FROM Container_Item WHERE Container_ID = NEW.Container_ID),
-				Total_Net_Wgt = (SELECT SUM(Net_Weight) FROM Container_Item WHERE Container_ID = NEW.Container_ID),
-				Total_Gross_Wgt = (SELECT SUM(Gross_Weight) FROM Container_Item WHERE Container_ID = NEW.Container_ID)
-			WHERE Container_ID = NEW.Container_ID;
-
-			-- 3. Aggregate to OLD Container (if changed)
-			UPDATE Container
-			SET Total_CBM = (SELECT SUM(Cbm) FROM Container_Item WHERE Container_ID = OLD.Container_ID),
-				Total_Net_Wgt = (SELECT SUM(Net_Weight) FROM Container_Item WHERE Container_ID = OLD.Container_ID),
-				Total_Gross_Wgt = (SELECT SUM(Gross_Weight) FROM Container_Item WHERE Container_ID = OLD.Container_ID)
-			WHERE Container_ID = OLD.Container_ID AND OLD.Container_ID <> NEW.Container_ID;
-		END;`,
-		`CREATE TRIGGER IF NOT EXISTS trg_container_item_calc_delete
-		AFTER DELETE ON Container_Item
-		BEGIN
-			UPDATE Container
-			SET Total_CBM = (SELECT IFNULL(SUM(Cbm), 0) FROM Container_Item WHERE Container_ID = OLD.Container_ID),
-				Total_Net_Wgt = (SELECT IFNULL(SUM(Net_Weight), 0) FROM Container_Item WHERE Container_ID = OLD.Container_ID),
-				Total_Gross_Wgt = (SELECT IFNULL(SUM(Gross_Weight), 0) FROM Container_Item WHERE Container_ID = OLD.Container_ID)
-			WHERE Container_ID = OLD.Container_ID;
-		END;`,
-		`CREATE TRIGGER IF NOT EXISTS trg_container_item_po_item_status_insert
-		AFTER INSERT ON Container_Item
-		BEGIN
-			UPDATE PO_Item
-			SET Status = CASE 
-				WHEN (SELECT IFNULL(SUM(Load_Qty), 0) FROM Container_Item WHERE PO_Item_ID = NEW.PO_Item_ID) >= PO_Qty THEN 'Shipped'
-				WHEN (SELECT IFNULL(SUM(Load_Qty), 0) FROM Container_Item WHERE PO_Item_ID = NEW.PO_Item_ID) > 0 THEN 'Partially Shipped'
-				ELSE 'Not Shipped'
-			END
-			WHERE PO_Item_ID = NEW.PO_Item_ID AND Status != 'Cancelled';
-		END;`,
-		`CREATE TRIGGER IF NOT EXISTS trg_container_item_po_item_status_update
-		AFTER UPDATE ON Container_Item
-		BEGIN
-			UPDATE PO_Item
-			SET Status = CASE 
-				WHEN (SELECT IFNULL(SUM(Load_Qty), 0) FROM Container_Item WHERE PO_Item_ID = NEW.PO_Item_ID) >= PO_Qty THEN 'Shipped'
-				WHEN (SELECT IFNULL(SUM(Load_Qty), 0) FROM Container_Item WHERE PO_Item_ID = NEW.PO_Item_ID) > 0 THEN 'Partially Shipped'
-				ELSE 'Not Shipped'
-			END
-			WHERE PO_Item_ID = NEW.PO_Item_ID AND Status != 'Cancelled';
-
-			UPDATE PO_Item
-			SET Status = CASE 
-				WHEN (SELECT IFNULL(SUM(Load_Qty), 0) FROM Container_Item WHERE PO_Item_ID = OLD.PO_Item_ID) >= PO_Qty THEN 'Shipped'
-				WHEN (SELECT IFNULL(SUM(Load_Qty), 0) FROM Container_Item WHERE PO_Item_ID = OLD.PO_Item_ID) > 0 THEN 'Partially Shipped'
-				ELSE 'Not Shipped'
-			END
-			WHERE PO_Item_ID = OLD.PO_Item_ID AND OLD.PO_Item_ID <> NEW.PO_Item_ID AND Status != 'Cancelled';
-		END;`,
-		`CREATE TRIGGER IF NOT EXISTS trg_container_item_po_item_status_delete
-		AFTER DELETE ON Container_Item
-		BEGIN
-			UPDATE PO_Item
-			SET Status = CASE 
-				WHEN (SELECT IFNULL(SUM(Load_Qty), 0) FROM Container_Item WHERE PO_Item_ID = OLD.PO_Item_ID) >= PO_Qty THEN 'Shipped'
-				WHEN (SELECT IFNULL(SUM(Load_Qty), 0) FROM Container_Item WHERE PO_Item_ID = OLD.PO_Item_ID) > 0 THEN 'Partially Shipped'
-				ELSE 'Not Shipped'
-			END
-			WHERE PO_Item_ID = OLD.PO_Item_ID AND Status != 'Cancelled';
-		END;`,
+		`CREATE TABLE IF NOT EXISTS Constraint_Profile (
+			Profile_ID INTEGER PRIMARY KEY AUTOINCREMENT,
+			Profile_No TEXT UNIQUE NOT NULL,
+			Name TEXT NOT NULL,
+			Remark TEXT,
+			Created_By TEXT,
+			Created_At DATETIME DEFAULT CURRENT_TIMESTAMP,
+			Updated_By TEXT,
+			Updated_At DATETIME DEFAULT CURRENT_TIMESTAMP,
+			UUID TEXT UNIQUE NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS Constraint_Master (
+			Constraint_ID INTEGER PRIMARY KEY AUTOINCREMENT,
+			Name TEXT UNIQUE NOT NULL,
+			Lead_Time_Days INTEGER DEFAULT 0,
+			Remark TEXT,
+			Created_By TEXT,
+			Created_At DATETIME DEFAULT CURRENT_TIMESTAMP,
+			Updated_By TEXT,
+			Updated_At DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE TABLE IF NOT EXISTS Constraint_Profile_Step (
+			Step_ID INTEGER PRIMARY KEY AUTOINCREMENT,
+			Profile_ID INTEGER NOT NULL,
+			Sequence INTEGER NOT NULL,
+			Constraint_Type TEXT NOT NULL,
+			Lead_Time_Days INTEGER DEFAULT 0,
+			Is_Optional INTEGER DEFAULT 0,
+			Remark TEXT,
+			FOREIGN KEY (Profile_ID) REFERENCES Constraint_Profile(Profile_ID) ON DELETE CASCADE
+		)`,
+		`CREATE TABLE IF NOT EXISTS Constraint_Instance (
+			Instance_ID INTEGER PRIMARY KEY AUTOINCREMENT,
+			Lot_ID INTEGER NOT NULL,
+			Source_Container_Item_ID INTEGER,
+			Profile_ID INTEGER,
+			Predecessor_ID INTEGER,
+			Sequence INTEGER,
+			Constraint_Type TEXT NOT NULL,
+			Lead_Time_Days INTEGER DEFAULT 0,
+			Is_Optional INTEGER DEFAULT 0,
+			Planned_Start DATETIME,
+			Actual_Start DATETIME,
+			Planned_End DATETIME,
+			Actual_End DATETIME,
+			Status TEXT DEFAULT 'Planned',
+			Remark TEXT,
+			Created_By TEXT,
+			Created_At DATETIME DEFAULT CURRENT_TIMESTAMP,
+			Updated_By TEXT,
+			Updated_At DATETIME DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (Lot_ID) REFERENCES Inventory_Lot(Lot_ID)
+		)`,
 	}
 
 	for _, q := range queries {
@@ -424,6 +358,9 @@ func migrateLegacySchemas(db *sql.DB) error {
 	// Make Cost_Allocation_Item.AP_ID nullable
 	_ = migrateCostAllocationItemAPIDNullable(db)
 
+	// Remove redundant audit columns from Cost_Allocation_Item (parent Cost_Allocation already audits)
+	_ = migrateCostAllocationItemDropAuditColumns(db)
+
 	// Add Is_Late_Cost_Allocation to Cost_Allocation if missing
 	var hasLateCol int
 	err = db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('Cost_Allocation') WHERE name = 'Is_Late_Cost_Allocation'`).Scan(&hasLateCol)
@@ -431,8 +368,311 @@ func migrateLegacySchemas(db *sql.DB) error {
 		_, _ = db.Exec(`ALTER TABLE Cost_Allocation ADD COLUMN Is_Late_Cost_Allocation INTEGER DEFAULT 0`)
 	}
 
+	// Item_Master packaging fields (박스 입수 / 팔렛 적재량 / 박스 규격)
+	_ = migrateItemMasterPackagingColumns(db)
+
+	// Goods_Receipt GR_No 컬럼
+	_ = migrateGoodsReceiptGRNo(db)
+
+	// PO 품목 변경 이력(Kind/Old/New) 컬럼 + PO_Item 스키마(Base_Qty, PO_Qty>=0, Cancelled 제거)
+	_ = migratePOItemAdjustmentColumns(db)
+	_ = migratePOItemSchema(db)
+
+	// A1: (PO, SKU, 단가) 단가 버킷 — 기존 중복 병합 후 유니크 인덱스 생성
+	_ = migratePOItemBucketDedup(db)
+
+	// 레거시 DB에 남아있을 수 있는 파생 트리거 제거 (파생 로직은 앱 레이어로 이관됨)
+	_ = dropLegacyProcurementTriggers(db)
+
+	// 배분 기준 'Unit' → 'Row' 로 이관 (CHECK 제약 갱신)
+	_ = migrateAllocationTypeRow(db)
+
+	// PO_Item 상태(파생 캐시)를 현재 선적량 기준으로 재계산하여 일관성 보장
+	_ = recomputePOItemStatuses(db)
+
+	// 행정 제약 프로파일 참조 컬럼 (Item_Master / Container_Item)
+	_ = migrateConstraintColumns(db)
+
 	return nil
 }
+
+// migrateConstraintColumns Item_Master/Container_Item에 제약 프로파일 참조 컬럼을 추가한다.
+func migrateConstraintColumns(db *sql.DB) error {
+	cols := []struct {
+		table string
+		name  string
+		sql   string
+	}{
+		{"Item_Master", "Default_Constraint_Profile_ID", "INTEGER"},
+		{"Container_Item", "Constraint_Profile_ID", "INTEGER"},
+		{"Constraint_Profile_Step", "Constraint_ID", "INTEGER"},
+	}
+	for _, c := range cols {
+		var has int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?`, c.table, c.name).Scan(&has); err != nil {
+			continue
+		}
+		if has == 0 {
+			if _, err := db.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", c.table, c.name, c.sql)); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// migrateAllocationTypeRow Allocation_Type의 'Unit'을 'Row'로 변경하고 CHECK 제약을 갱신한다.
+func migrateAllocationTypeRow(db *sql.DB) error {
+	var sqlText string
+	if err := db.QueryRow(`SELECT sql FROM sqlite_master WHERE type='table' AND name='Account_Payable'`).Scan(&sqlText); err != nil {
+		return nil
+	}
+	if strings.Contains(sqlText, "'Row'") {
+		return nil
+	}
+	queries := []string{
+		`CREATE TABLE Account_Payable_new (
+			AP_ID INTEGER PRIMARY KEY AUTOINCREMENT,
+			Vendor_ID INTEGER NOT NULL,
+			AP_No TEXT UNIQUE NOT NULL,
+			Amount REAL NOT NULL,
+			Currency TEXT NOT NULL,
+			Local_Amount REAL,
+			Allocation_Type TEXT CHECK (Allocation_Type IN ('Weight', 'Volume', 'Quantity', 'Value', 'Row')),
+			Reference_UUID TEXT,
+			Reference_Type TEXT,
+			Due_Date DATETIME,
+			Date_of_Payment DATETIME,
+			Status TEXT CHECK (Status IN ('paid', 'unpaid')) DEFAULT 'unpaid',
+			Allocation_Status TEXT CHECK (Allocation_Status IN ('Draft', 'Open', 'Closed')),
+			Remark TEXT,
+			Created_By TEXT,
+			Created_At DATETIME DEFAULT CURRENT_TIMESTAMP,
+			Updated_By TEXT,
+			Updated_At DATETIME DEFAULT CURRENT_TIMESTAMP,
+			UUID TEXT UNIQUE NOT NULL,
+			FOREIGN KEY (Vendor_ID) REFERENCES Vendor_Master(Vendor_ID)
+		)`,
+		`INSERT INTO Account_Payable_new (AP_ID, Vendor_ID, AP_No, Amount, Currency, Local_Amount, Allocation_Type, Reference_UUID, Reference_Type, Due_Date, Date_of_Payment, Status, Allocation_Status, Remark, Created_By, Created_At, Updated_By, Updated_At, UUID)
+		 SELECT AP_ID, Vendor_ID, AP_No, Amount, Currency, Local_Amount,
+		        CASE WHEN Allocation_Type = 'Unit' THEN 'Row' ELSE Allocation_Type END,
+		        Reference_UUID, Reference_Type, Due_Date, Date_of_Payment, Status, Allocation_Status, Remark, Created_By, Created_At, Updated_By, Updated_At, UUID
+		 FROM Account_Payable`,
+		`DROP TABLE Account_Payable`,
+		`ALTER TABLE Account_Payable_new RENAME TO Account_Payable`,
+	}
+	for _, q := range queries {
+		if _, err := db.Exec(q); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// migratePOItemBucketDedup (PO, SKU, 단가) 중복 버킷을 하나로 병합하고 유니크 인덱스를 생성한다.
+func migratePOItemBucketDedup(db *sql.DB) error {
+	rows, err := db.Query(`SELECT MIN(PO_Item_ID), PO_ID, Item_ID, Unit_Price
+		FROM PO_Item GROUP BY PO_ID, Item_ID, Unit_Price HAVING COUNT(*) > 1`)
+	if err != nil {
+		return err
+	}
+	type grp struct {
+		keepID int
+		poID   int
+		itemID int
+		price  float64
+	}
+	groups := []grp{}
+	for rows.Next() {
+		var g grp
+		if err := rows.Scan(&g.keepID, &g.poID, &g.itemID, &g.price); err != nil {
+			continue
+		}
+		groups = append(groups, g)
+	}
+	rows.Close()
+
+	for _, g := range groups {
+		// 그룹 내 다른 항목 ID 수집
+		idRows, err := db.Query("SELECT PO_Item_ID FROM PO_Item WHERE PO_ID = ? AND Item_ID = ? AND Unit_Price = ?", g.poID, g.itemID, g.price)
+		if err != nil {
+			continue
+		}
+		dropIDs := []int{}
+		for idRows.Next() {
+			var id int
+			idRows.Scan(&id)
+			if id != g.keepID {
+				dropIDs = append(dropIDs, id)
+			}
+		}
+		idRows.Close()
+
+		for _, drop := range dropIDs {
+			// 자식 참조 재지정
+			_, _ = db.Exec("UPDATE Container_Item SET PO_Item_ID = ? WHERE PO_Item_ID = ?", g.keepID, drop)
+			_, _ = db.Exec("UPDATE PO_Item_Adjustment SET PO_Item_ID = ? WHERE PO_Item_ID = ?", g.keepID, drop)
+			// 수량 합산
+			var baseQty, poQty float64
+			_ = db.QueryRow("SELECT IFNULL(Base_Qty,0), IFNULL(PO_Qty,0) FROM PO_Item WHERE PO_Item_ID = ?", drop).Scan(&baseQty, &poQty)
+			_, _ = db.Exec("UPDATE PO_Item SET Base_Qty = IFNULL(Base_Qty,0) + ?, PO_Qty = IFNULL(PO_Qty,0) + ? WHERE PO_Item_ID = ?", baseQty, poQty, g.keepID)
+			// 중복 항목 삭제
+			_, _ = db.Exec("DELETE FROM PO_Item WHERE PO_Item_ID = ?", drop)
+		}
+	}
+
+	_, _ = db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_po_item_bucket ON PO_Item(PO_ID, Item_ID, Unit_Price)`)
+	return nil
+}
+
+func migratePOItemAdjustmentColumns(db *sql.DB) error {
+	cols := []struct {
+		name string
+		sql  string
+	}{
+		{"Kind", "TEXT NOT NULL DEFAULT 'QTY'"},
+		{"Old_Value", "REAL"},
+		{"New_Value", "REAL"},
+	}
+	for _, c := range cols {
+		var has int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('PO_Item_Adjustment') WHERE name = ?`, c.name).Scan(&has); err != nil {
+			continue
+		}
+		if has == 0 {
+			if _, err := db.Exec(fmt.Sprintf("ALTER TABLE PO_Item_Adjustment ADD COLUMN %s %s", c.name, c.sql)); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func migratePOItemSchema(db *sql.DB) error {
+	var sqlText string
+	if err := db.QueryRow(`SELECT sql FROM sqlite_master WHERE type='table' AND name='PO_Item'`).Scan(&sqlText); err != nil {
+		return nil
+	}
+	needRebuild := !strings.Contains(sqlText, "Base_Qty") || strings.Contains(sqlText, "Cancelled") || !strings.Contains(sqlText, "Over Shipped")
+	if !needRebuild {
+		return nil
+	}
+	// 기존 취소(Cancelled) 항목을 음수 증분 이벤트로 이관
+	_, _ = db.Exec(`INSERT INTO PO_Item_Adjustment (PO_Item_ID, Kind, Qty_Delta, Old_Value, New_Value, Reason, Created_By)
+		SELECT PO_Item_ID, 'QTY', -PO_Qty, PO_Qty, 0, '기존 취소 이관', 'system' FROM PO_Item WHERE Status = 'Cancelled'`)
+
+	queries := []string{
+		`CREATE TABLE PO_Item_new (
+			PO_Item_ID INTEGER PRIMARY KEY AUTOINCREMENT,
+			PO_ID INTEGER NOT NULL,
+			Item_ID INTEGER NOT NULL,
+			Base_Qty REAL,
+			PO_Qty REAL CHECK (PO_Qty >= 0),
+			Unit_Price REAL NOT NULL,
+			Status TEXT CHECK (Status IN ('Shipped', 'Partially Shipped', 'Over Shipped', 'Not Shipped')) DEFAULT 'Not Shipped',
+			Remark TEXT,
+			Created_By TEXT,
+			Created_At DATETIME DEFAULT CURRENT_TIMESTAMP,
+			Updated_By TEXT,
+			Updated_At DATETIME DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (PO_ID) REFERENCES Purchase_Order(PO_ID),
+			FOREIGN KEY (Item_ID) REFERENCES Item_Master(Item_ID)
+		)`,
+		`INSERT INTO PO_Item_new (PO_Item_ID, PO_ID, Item_ID, Base_Qty, PO_Qty, Unit_Price, Status, Remark, Created_By, Created_At, Updated_By, Updated_At)
+		 SELECT PO_Item_ID, PO_ID, Item_ID, PO_Qty, CASE WHEN Status='Cancelled' THEN 0 ELSE PO_Qty END, Unit_Price,
+		        CASE WHEN Status='Cancelled' THEN 'Not Shipped' ELSE Status END, Remark, Created_By, Created_At, Updated_By, Updated_At
+		 FROM PO_Item`,
+		`DROP TABLE PO_Item`,
+		`ALTER TABLE PO_Item_new RENAME TO PO_Item`,
+	}
+	for _, q := range queries {
+		if _, err := db.Exec(q); err != nil {
+			return err
+		}
+	}
+	// 기존 데이터의 상태를 새 규칙(Over Shipped 포함)으로 재계산
+	return recomputePOItemStatuses(db)
+}
+
+// recomputePOItemStatuses 기존 PO_Item의 상태를 현재 선적량(SUM Load_Qty) 기준으로 재계산한다.
+func recomputePOItemStatuses(db *sql.DB) error {
+	_, err := db.Exec(`UPDATE PO_Item SET Status = CASE
+		WHEN (SELECT IFNULL(SUM(Load_Qty), 0) FROM Container_Item WHERE PO_Item_ID = PO_Item.PO_Item_ID) > PO_Qty THEN 'Over Shipped'
+		WHEN PO_Qty > 0 AND (SELECT IFNULL(SUM(Load_Qty), 0) FROM Container_Item WHERE PO_Item_ID = PO_Item.PO_Item_ID) >= PO_Qty THEN 'Shipped'
+		WHEN (SELECT IFNULL(SUM(Load_Qty), 0) FROM Container_Item WHERE PO_Item_ID = PO_Item.PO_Item_ID) > 0 THEN 'Partially Shipped'
+		ELSE 'Not Shipped'
+	END`)
+	return err
+}
+
+// dropLegacyProcurementTriggers 과거 스키마에 존재하던 파생 로직 트리거를 제거한다.
+// 파생값(상태/집계)은 이제 애플리케이션(유스케이스) 레이어에서 계산한다.
+func dropLegacyProcurementTriggers(db *sql.DB) error {
+	names := []string{
+		"trg_sync_po_status", "trg_sync_po_status_delete",
+		"trg_container_item_calc_insert", "trg_container_item_calc_update", "trg_container_item_calc_delete",
+		"trg_container_item_po_item_status_insert", "trg_container_item_po_item_status_update", "trg_container_item_po_item_status_delete",
+	}
+	for _, n := range names {
+		if _, err := db.Exec("DROP TRIGGER IF EXISTS " + n); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func migrateGoodsReceiptGRNo(db *sql.DB) error {
+	var has int
+	err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('Goods_Receipt') WHERE name = 'GR_No'`).Scan(&has)
+	if err == nil && has == 0 {
+		if _, err := db.Exec(`ALTER TABLE Goods_Receipt ADD COLUMN GR_No TEXT`); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func migrateItemMasterPackagingColumns(db *sql.DB) error {
+	cols := []struct {
+		name string
+		sql  string
+	}{
+		{"Box_Qty", "INTEGER NOT NULL DEFAULT 1"},
+		{"Boxes_Per_Pallet", "INTEGER"},
+		{"Box_Width", "REAL"},
+		{"Box_Length", "REAL"},
+		{"Box_Height", "REAL"},
+	}
+	for _, c := range cols {
+		var has int
+		err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('Item_Master') WHERE name = ?`, c.name).Scan(&has)
+		if err == nil && has == 0 {
+			if _, err := db.Exec(fmt.Sprintf("ALTER TABLE Item_Master ADD COLUMN %s %s", c.name, c.sql)); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func migrateCostAllocationItemDropAuditColumns(db *sql.DB) error {
+	// Cost_Allocation_Item audit fields are redundant with the parent Cost_Allocation.
+	// Drop them if present (best effort; SQLite 3.35+ supports DROP COLUMN).
+	for _, col := range []string{"Created_By", "Created_At", "Updated_By", "Updated_At"} {
+		var has int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('Cost_Allocation_Item') WHERE name = ?`, col).Scan(&has); err != nil {
+			continue
+		}
+		if has == 0 {
+			continue
+		}
+		if _, err := db.Exec(fmt.Sprintf("ALTER TABLE Cost_Allocation_Item DROP COLUMN %s", col)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 
 func migrateVendorMasterCategoryConstraint(db *sql.DB) error {
 	var constraintCount int
@@ -506,7 +746,7 @@ func (r *SQLiteProcurementRepository) SeedData() error {
 
 // Item Master
 func (r *SQLiteProcurementRepository) GetItems() ([]models.ItemMaster, error) {
-	rows, err := r.db.Query("SELECT Item_ID, SKU_Code, Name, Vendor_ID, IFNULL(CBM, 0), IFNULL(Net_Weight, 0), IFNULL(Gross_Weight, 0), IFNULL(Remark, ''), IFNULL(Created_By, ''), Created_At, IFNULL(Updated_By, ''), Updated_At FROM Item_Master")
+	rows, err := r.db.Query("SELECT Item_ID, SKU_Code, Name, Vendor_ID, IFNULL(Default_Constraint_Profile_ID, 0), IFNULL(CBM, 0), IFNULL(Box_Qty, 1), IFNULL(Boxes_Per_Pallet, 0), IFNULL(Box_Width, 0), IFNULL(Box_Length, 0), IFNULL(Box_Height, 0), IFNULL(Net_Weight, 0), IFNULL(Gross_Weight, 0), IFNULL(Remark, ''), IFNULL(Created_By, ''), Created_At, IFNULL(Updated_By, ''), Updated_At FROM Item_Master")
 	if err != nil {
 		return nil, err
 	}
@@ -515,7 +755,7 @@ func (r *SQLiteProcurementRepository) GetItems() ([]models.ItemMaster, error) {
 	list := []models.ItemMaster{}
 	for rows.Next() {
 		var i models.ItemMaster
-		err := rows.Scan(&i.ID, &i.SKUCode, &i.Name, &i.VendorID, &i.CBM, &i.NetWeight, &i.GrossWeight, &i.Remark, &i.CreatedBy, &i.CreatedAt, &i.UpdatedBy, &i.UpdatedAt)
+		err := rows.Scan(&i.ID, &i.SKUCode, &i.Name, &i.VendorID, &i.DefaultConstraintProfileID, &i.CBM, &i.BoxQty, &i.BoxesPerPallet, &i.BoxWidth, &i.BoxLength, &i.BoxHeight, &i.NetWeight, &i.GrossWeight, &i.Remark, &i.CreatedBy, &i.CreatedAt, &i.UpdatedBy, &i.UpdatedAt)
 		if err != nil {
 			return nil, err
 		}
@@ -526,8 +766,8 @@ func (r *SQLiteProcurementRepository) GetItems() ([]models.ItemMaster, error) {
 
 func (r *SQLiteProcurementRepository) GetItemByID(id int) (*models.ItemMaster, error) {
 	var i models.ItemMaster
-	err := r.db.QueryRow("SELECT Item_ID, SKU_Code, Name, Vendor_ID, IFNULL(CBM, 0), IFNULL(Net_Weight, 0), IFNULL(Gross_Weight, 0), IFNULL(Remark, ''), IFNULL(Created_By, ''), Created_At, IFNULL(Updated_By, ''), Updated_At FROM Item_Master WHERE Item_ID = ?", id).
-		Scan(&i.ID, &i.SKUCode, &i.Name, &i.VendorID, &i.CBM, &i.NetWeight, &i.GrossWeight, &i.Remark, &i.CreatedBy, &i.CreatedAt, &i.UpdatedBy, &i.UpdatedAt)
+	err := r.db.QueryRow("SELECT Item_ID, SKU_Code, Name, Vendor_ID, IFNULL(Default_Constraint_Profile_ID, 0), IFNULL(CBM, 0), IFNULL(Box_Qty, 1), IFNULL(Boxes_Per_Pallet, 0), IFNULL(Box_Width, 0), IFNULL(Box_Length, 0), IFNULL(Box_Height, 0), IFNULL(Net_Weight, 0), IFNULL(Gross_Weight, 0), IFNULL(Remark, ''), IFNULL(Created_By, ''), Created_At, IFNULL(Updated_By, ''), Updated_At FROM Item_Master WHERE Item_ID = ?", id).
+		Scan(&i.ID, &i.SKUCode, &i.Name, &i.VendorID, &i.DefaultConstraintProfileID, &i.CBM, &i.BoxQty, &i.BoxesPerPallet, &i.BoxWidth, &i.BoxLength, &i.BoxHeight, &i.NetWeight, &i.GrossWeight, &i.Remark, &i.CreatedBy, &i.CreatedAt, &i.UpdatedBy, &i.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -536,8 +776,8 @@ func (r *SQLiteProcurementRepository) GetItemByID(id int) (*models.ItemMaster, e
 
 func (r *SQLiteProcurementRepository) SaveItem(i *models.ItemMaster) error {
 	if i.ID == 0 {
-		res, err := r.db.Exec("INSERT INTO Item_Master (SKU_Code, Name, Vendor_ID, CBM, Net_Weight, Gross_Weight, Remark, Created_By) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-			i.SKUCode, i.Name, i.VendorID, i.CBM, i.NetWeight, i.GrossWeight, i.Remark, i.CreatedBy)
+		res, err := r.db.Exec("INSERT INTO Item_Master (SKU_Code, Name, Vendor_ID, Default_Constraint_Profile_ID, CBM, Box_Qty, Boxes_Per_Pallet, Box_Width, Box_Length, Box_Height, Net_Weight, Gross_Weight, Remark, Created_By) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+			i.SKUCode, i.Name, i.VendorID, i.DefaultConstraintProfileID, i.CBM, i.BoxQty, i.BoxesPerPallet, i.BoxWidth, i.BoxLength, i.BoxHeight, i.NetWeight, i.GrossWeight, i.Remark, i.CreatedBy)
 		if err != nil {
 			return err
 		}
@@ -545,8 +785,8 @@ func (r *SQLiteProcurementRepository) SaveItem(i *models.ItemMaster) error {
 		i.ID = int(id)
 		return nil
 	}
-	_, err := r.db.Exec("UPDATE Item_Master SET SKU_Code=?, Name=?, Vendor_ID=?, CBM=?, Net_Weight=?, Gross_Weight=?, Remark=?, Updated_By=?, Updated_At=CURRENT_TIMESTAMP WHERE Item_ID=?",
-		i.SKUCode, i.Name, i.VendorID, i.CBM, i.NetWeight, i.GrossWeight, i.Remark, i.UpdatedBy, i.ID)
+	_, err := r.db.Exec("UPDATE Item_Master SET SKU_Code=?, Name=?, Vendor_ID=?, Default_Constraint_Profile_ID=?, CBM=?, Box_Qty=?, Boxes_Per_Pallet=?, Box_Width=?, Box_Length=?, Box_Height=?, Net_Weight=?, Gross_Weight=?, Remark=?, Updated_By=?, Updated_At=CURRENT_TIMESTAMP WHERE Item_ID=?",
+		i.SKUCode, i.Name, i.VendorID, i.DefaultConstraintProfileID, i.CBM, i.BoxQty, i.BoxesPerPallet, i.BoxWidth, i.BoxLength, i.BoxHeight, i.NetWeight, i.GrossWeight, i.Remark, i.UpdatedBy, i.ID)
 	return err
 }
 
@@ -644,7 +884,7 @@ func (r *SQLiteProcurementRepository) SavePurchaseOrder(p *models.PurchaseOrder)
 
 // PO Item
 func (r *SQLiteProcurementRepository) GetPOItemsByPOID(poID int) ([]models.POItem, error) {
-	rows, err := r.db.Query("SELECT PO_Item_ID, PO_ID, Item_ID, IFNULL(PO_Qty, 0), IFNULL(Unit_Price, 0), Status, IFNULL(Remark, ''), IFNULL(Created_By, ''), Created_At, IFNULL(Updated_By, ''), Updated_At FROM PO_Item WHERE PO_ID = ?", poID)
+	rows, err := r.db.Query("SELECT PO_Item_ID, PO_ID, Item_ID, IFNULL(Base_Qty, IFNULL(PO_Qty,0)), IFNULL(PO_Qty, 0), IFNULL(Unit_Price, 0), Status, IFNULL(Remark, ''), IFNULL(Created_By, ''), Created_At, IFNULL(Updated_By, ''), Updated_At FROM PO_Item WHERE PO_ID = ?", poID)
 	if err != nil {
 		return nil, err
 	}
@@ -653,7 +893,7 @@ func (r *SQLiteProcurementRepository) GetPOItemsByPOID(poID int) ([]models.POIte
 	list := []models.POItem{}
 	for rows.Next() {
 		var i models.POItem
-		err := rows.Scan(&i.ID, &i.POID, &i.ItemID, &i.POQty, &i.UnitPrice, &i.Status, &i.Remark, &i.CreatedBy, &i.CreatedAt, &i.UpdatedBy, &i.UpdatedAt)
+		err := rows.Scan(&i.ID, &i.POID, &i.ItemID, &i.BaseQty, &i.POQty, &i.UnitPrice, &i.Status, &i.Remark, &i.CreatedBy, &i.CreatedAt, &i.UpdatedBy, &i.UpdatedAt)
 		if err != nil {
 			return nil, err
 		}
@@ -663,9 +903,13 @@ func (r *SQLiteProcurementRepository) GetPOItemsByPOID(poID int) ([]models.POIte
 }
 
 func (r *SQLiteProcurementRepository) SavePOItem(i *models.POItem) error {
+	baseQty := i.BaseQty
+	if baseQty <= 0 {
+		baseQty = i.POQty
+	}
 	if i.ID == 0 {
-		res, err := r.db.Exec("INSERT INTO PO_Item (PO_ID, Item_ID, PO_Qty, Unit_Price, Status, Remark, Created_By) VALUES (?, ?, ?, ?, ?, ?, ?)",
-			i.POID, i.ItemID, i.POQty, i.UnitPrice, i.Status, i.Remark, i.CreatedBy)
+		res, err := r.db.Exec("INSERT INTO PO_Item (PO_ID, Item_ID, Base_Qty, PO_Qty, Unit_Price, Status, Remark, Created_By) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+			i.POID, i.ItemID, baseQty, i.POQty, i.UnitPrice, i.Status, i.Remark, i.CreatedBy)
 		if err != nil {
 			return err
 		}
@@ -673,9 +917,31 @@ func (r *SQLiteProcurementRepository) SavePOItem(i *models.POItem) error {
 		i.ID = int(id)
 		return nil
 	}
-	_, err := r.db.Exec("UPDATE PO_Item SET Item_ID=?, PO_Qty=?, Unit_Price=?, Status=?, Remark=?, Updated_By=?, Updated_At=CURRENT_TIMESTAMP WHERE PO_Item_ID=?",
-		i.ItemID, i.POQty, i.UnitPrice, i.Status, i.Remark, i.UpdatedBy, i.ID)
+	// A1: Unit_Price는 불변 (단가 변경은 새 PO_Item 버킷 생성으로 처리)
+	_, err := r.db.Exec("UPDATE PO_Item SET Item_ID=?, Base_Qty=?, PO_Qty=?, Status=?, Remark=?, Updated_By=?, Updated_At=CURRENT_TIMESTAMP WHERE PO_Item_ID=?",
+		i.ItemID, baseQty, i.POQty, i.Status, i.Remark, i.UpdatedBy, i.ID)
 	return err
+}
+
+// GetPOItemByBucket (PO_ID, Item_ID, Unit_Price)로 단가 버킷 조회
+func (r *SQLiteProcurementRepository) GetPOItemByBucket(poID int, itemID int, unitPrice float64) (*models.POItem, error) {
+	var i models.POItem
+	err := r.db.QueryRow("SELECT PO_Item_ID, PO_ID, Item_ID, IFNULL(Base_Qty, IFNULL(PO_Qty,0)), IFNULL(PO_Qty, 0), IFNULL(Unit_Price, 0), Status, IFNULL(Remark, ''), IFNULL(Created_By, ''), Created_At, IFNULL(Updated_By, ''), Updated_At FROM PO_Item WHERE PO_ID = ? AND Item_ID = ? AND Unit_Price = ?", poID, itemID, unitPrice).
+		Scan(&i.ID, &i.POID, &i.ItemID, &i.BaseQty, &i.POQty, &i.UnitPrice, &i.Status, &i.Remark, &i.CreatedBy, &i.CreatedAt, &i.UpdatedBy, &i.UpdatedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &i, nil
+}
+
+// GetPOLoadQty PO 품목에 누적된 선적량(SUM Load_Qty)
+func (r *SQLiteProcurementRepository) GetPOLoadQty(poItemID int) (float64, error) {
+	var qty float64
+	err := r.db.QueryRow("SELECT IFNULL(SUM(Load_Qty), 0) FROM Container_Item WHERE PO_Item_ID = ?", poItemID).Scan(&qty)
+	return qty, err
 }
 
 func (r *SQLiteProcurementRepository) DeletePOItem(id int) error {
@@ -686,6 +952,105 @@ func (r *SQLiteProcurementRepository) DeletePOItem(id int) error {
 	}
 	_, err = r.db.Exec("DELETE FROM PO_Item WHERE PO_Item_ID = ?", id)
 	return err
+}
+
+func (r *SQLiteProcurementRepository) GetPOItemByID(id int) (*models.POItem, error) {
+	var i models.POItem
+	err := r.db.QueryRow("SELECT PO_Item_ID, PO_ID, Item_ID, IFNULL(Base_Qty, IFNULL(PO_Qty,0)), IFNULL(PO_Qty, 0), IFNULL(Unit_Price, 0), Status, IFNULL(Remark, ''), IFNULL(Created_By, ''), Created_At, IFNULL(Updated_By, ''), Updated_At FROM PO_Item WHERE PO_Item_ID = ?", id).
+		Scan(&i.ID, &i.POID, &i.ItemID, &i.BaseQty, &i.POQty, &i.UnitPrice, &i.Status, &i.Remark, &i.CreatedBy, &i.CreatedAt, &i.UpdatedBy, &i.UpdatedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &i, nil
+}
+
+func (r *SQLiteProcurementRepository) SavePOItemAdjustment(a *models.POItemAdjustment) error {
+	kind := a.Kind
+	if kind == "" {
+		kind = "QTY"
+	}
+	res, err := r.db.Exec("INSERT INTO PO_Item_Adjustment (PO_Item_ID, Kind, Qty_Delta, Old_Value, New_Value, Reason, Created_By) VALUES (?, ?, ?, ?, ?, ?, ?)",
+		a.POItemID, kind, a.QtyDelta, a.OldValue, a.NewValue, a.Reason, a.CreatedBy)
+	if err != nil {
+		return err
+	}
+	id, _ := res.LastInsertId()
+	a.ID = int(id)
+	return nil
+}
+
+func (r *SQLiteProcurementRepository) GetPOItemAdjustmentsByPOItemID(poItemID int) ([]models.POItemAdjustment, error) {
+	rows, err := r.db.Query("SELECT Adjustment_ID, PO_Item_ID, IFNULL(Kind, 'QTY'), IFNULL(Qty_Delta, 0), IFNULL(Old_Value, 0), IFNULL(New_Value, 0), IFNULL(Reason, ''), IFNULL(Created_By, ''), Created_At FROM PO_Item_Adjustment WHERE PO_Item_ID = ? ORDER BY Adjustment_ID ASC", poItemID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	list := []models.POItemAdjustment{}
+	for rows.Next() {
+		var a models.POItemAdjustment
+		if err := rows.Scan(&a.ID, &a.POItemID, &a.Kind, &a.QtyDelta, &a.OldValue, &a.NewValue, &a.Reason, &a.CreatedBy, &a.CreatedAt); err != nil {
+			return nil, err
+		}
+		list = append(list, a)
+	}
+	return list, nil
+}
+
+// GetPOItemAdjustmentsByPOID PO 단위 일괄 조회 (품목별 N+1 방지)
+func (r *SQLiteProcurementRepository) GetPOItemAdjustmentsByPOID(poID int) ([]models.POItemAdjustment, error) {
+	rows, err := r.db.Query(`
+		SELECT a.Adjustment_ID, a.PO_Item_ID, IFNULL(a.Kind, 'QTY'), IFNULL(a.Qty_Delta, 0), IFNULL(a.Old_Value, 0), IFNULL(a.New_Value, 0), IFNULL(a.Reason, ''), IFNULL(a.Created_By, ''), a.Created_At
+		FROM PO_Item_Adjustment a
+		JOIN PO_Item pi ON a.PO_Item_ID = pi.PO_Item_ID
+		WHERE pi.PO_ID = ?
+		ORDER BY a.PO_Item_ID ASC, a.Adjustment_ID ASC`, poID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	list := []models.POItemAdjustment{}
+	for rows.Next() {
+		var a models.POItemAdjustment
+		if err := rows.Scan(&a.ID, &a.POItemID, &a.Kind, &a.QtyDelta, &a.OldValue, &a.NewValue, &a.Reason, &a.CreatedBy, &a.CreatedAt); err != nil {
+			return nil, err
+		}
+		list = append(list, a)
+	}
+	return list, nil
+}
+
+// GetPOReferenceStatus PO의 편집 잠금 여부 판단용: AP 참조 여부 / Container Item 존재 여부
+func (r *SQLiteProcurementRepository) GetPOReferenceStatus(poID int) (bool, bool, error) {
+	// AP 직접 참조 또는 AP Target Group(멤버에 이 PO 포함)을 통한 간접 참조
+	var hasAP int
+	err := r.db.QueryRow(`
+		SELECT COUNT(*)
+		FROM Purchase_Order p
+		WHERE p.PO_ID = ?
+		  AND (
+			EXISTS (SELECT 1 FROM Account_Payable ap WHERE ap.Reference_Type = 'PO' AND ap.Reference_UUID = p.UUID)
+			OR EXISTS (
+				SELECT 1 FROM Account_Payable ap
+				JOIN AP_Target_Group g ON g.UUID = ap.Reference_UUID AND ap.Reference_Type = 'AP_Target_Group'
+				JOIN AP_Target_Group_Item gi ON gi.Group_ID = g.Group_ID
+				WHERE gi.Reference_UUID = p.UUID
+			)
+		  )`, poID).Scan(&hasAP)
+	if err != nil {
+		return false, false, err
+	}
+	var hasCI int
+	err = r.db.QueryRow(`
+		SELECT COUNT(*) FROM Container_Item ci
+		JOIN PO_Item pi ON ci.PO_Item_ID = pi.PO_Item_ID
+		WHERE pi.PO_ID = ?`, poID).Scan(&hasCI)
+	if err != nil {
+		return false, false, err
+	}
+	return hasAP > 0, hasCI > 0, nil
 }
 
 // Commercial Invoice
@@ -747,7 +1112,9 @@ func (r *SQLiteProcurementRepository) SaveCommercialInvoice(i *models.Commercial
 
 // Account Payable
 func (r *SQLiteProcurementRepository) GetAccountPayables() ([]models.AccountPayable, error) {
-	rows, err := r.db.Query("SELECT AP_ID, Vendor_ID, AP_No, IFNULL(Amount, 0), IFNULL(Currency, ''), IFNULL(Local_Amount, 0), IFNULL(Allocation_Type, ''), IFNULL(Reference_UUID, ''), IFNULL(Reference_Type, ''), Due_Date, Date_of_Payment, Status, IFNULL(Allocation_Status, ''), IFNULL(Remark, ''), IFNULL(Created_By, ''), Created_At, IFNULL(Updated_By, ''), Updated_At, UUID FROM Account_Payable")
+	rows, err := r.db.Query(`SELECT AP_ID, Vendor_ID, AP_No, IFNULL(Amount, 0), IFNULL(Currency, ''), IFNULL(Local_Amount, 0), IFNULL(Allocation_Type, ''), IFNULL(Reference_UUID, ''), IFNULL(Reference_Type, ''), Due_Date, Date_of_Payment, Status, IFNULL(Allocation_Status, ''), IFNULL(Remark, ''), IFNULL(Created_By, ''), Created_At, IFNULL(Updated_By, ''), Updated_At, UUID,
+		EXISTS(SELECT 1 FROM Cost_Allocation_Item WHERE AP_ID = Account_Payable.AP_ID) AS Has_Allocation
+		FROM Account_Payable`)
 	if err != nil {
 		return nil, err
 	}
@@ -756,10 +1123,12 @@ func (r *SQLiteProcurementRepository) GetAccountPayables() ([]models.AccountPaya
 	for rows.Next() {
 		var i models.AccountPayable
 		var dueDate, dateOfPayment *time.Time
-		err := rows.Scan(&i.ID, &i.VendorID, &i.APNo, &i.Amount, &i.Currency, &i.LocalAmount, &i.AllocationType, &i.ReferenceUUID, &i.ReferenceType, &dueDate, &dateOfPayment, &i.Status, &i.AllocationStatus, &i.Remark, &i.CreatedBy, &i.CreatedAt, &i.UpdatedBy, &i.UpdatedAt, &i.UUID)
+		var hasAlloc bool
+		err := rows.Scan(&i.ID, &i.VendorID, &i.APNo, &i.Amount, &i.Currency, &i.LocalAmount, &i.AllocationType, &i.ReferenceUUID, &i.ReferenceType, &dueDate, &dateOfPayment, &i.Status, &i.AllocationStatus, &i.Remark, &i.CreatedBy, &i.CreatedAt, &i.UpdatedBy, &i.UpdatedAt, &i.UUID, &hasAlloc)
 		if err != nil {
 			return nil, err
 		}
+		i.HasAllocation = hasAlloc
 		if dueDate != nil {
 			i.DueDate = *dueDate
 		}
@@ -769,6 +1138,36 @@ func (r *SQLiteProcurementRepository) GetAccountPayables() ([]models.AccountPaya
 		list = append(list, i)
 	}
 	return list, nil
+}
+
+func (r *SQLiteProcurementRepository) GetAccountPayableByID(id int) (*models.AccountPayable, error) {
+	var i models.AccountPayable
+	var dueDate, dateOfPayment *time.Time
+	err := r.db.QueryRow(`SELECT AP_ID, Vendor_ID, AP_No, IFNULL(Amount, 0), IFNULL(Currency, ''), IFNULL(Local_Amount, 0), IFNULL(Allocation_Type, ''), IFNULL(Reference_UUID, ''), IFNULL(Reference_Type, ''), Due_Date, Date_of_Payment, Status, IFNULL(Allocation_Status, ''), IFNULL(Remark, ''), IFNULL(Created_By, ''), Created_At, IFNULL(Updated_By, ''), Updated_At, UUID FROM Account_Payable WHERE AP_ID = ?`, id).
+		Scan(&i.ID, &i.VendorID, &i.APNo, &i.Amount, &i.Currency, &i.LocalAmount, &i.AllocationType, &i.ReferenceUUID, &i.ReferenceType, &dueDate, &dateOfPayment, &i.Status, &i.AllocationStatus, &i.Remark, &i.CreatedBy, &i.CreatedAt, &i.UpdatedBy, &i.UpdatedAt, &i.UUID)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if dueDate != nil {
+		i.DueDate = *dueDate
+	}
+	if dateOfPayment != nil {
+		i.DateOfPayment = *dateOfPayment
+	}
+	return &i, nil
+}
+
+func (r *SQLiteProcurementRepository) GetAPAllocatedAmount(apID int) (bool, float64, error) {
+	var hasAny bool
+	var total float64
+	err := r.db.QueryRow("SELECT CASE WHEN COUNT(*) > 0 THEN 1 ELSE 0 END, IFNULL(SUM(Allocated_Amount), 0) FROM Cost_Allocation_Item WHERE AP_ID = ?", apID).Scan(&hasAny, &total)
+	if err == sql.ErrNoRows {
+		return false, 0, nil
+	}
+	return hasAny, total, err
 }
 
 func (r *SQLiteProcurementRepository) SaveAccountPayable(i *models.AccountPayable) error {
@@ -801,6 +1200,19 @@ func (r *SQLiteProcurementRepository) GetContainers() ([]models.Container, error
 		list = append(list, i)
 	}
 	return list, nil
+}
+
+func (r *SQLiteProcurementRepository) GetContainerByID(id int) (*models.Container, error) {
+	var i models.Container
+	err := r.db.QueryRow("SELECT Container_ID, Container_No, IFNULL(Remark, ''), IFNULL(Total_CBM, 0), IFNULL(Total_Net_Wgt, 0), IFNULL(Total_Gross_Wgt, 0), Status, UUID FROM Container WHERE Container_ID = ?", id).
+		Scan(&i.ID, &i.ContainerNo, &i.Remark, &i.TotalCBM, &i.TotalNetWgt, &i.TotalGrossWgt, &i.Status, &i.UUID)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &i, nil
 }
 
 func (r *SQLiteProcurementRepository) SaveContainer(i *models.Container) error {
@@ -852,7 +1264,7 @@ func (r *SQLiteProcurementRepository) SaveBL(i *models.BL) error {
 
 // Goods Receipt & Inventory
 func (r *SQLiteProcurementRepository) GetGoodsReceipts() ([]models.GoodsReceipt, error) {
-	rows, err := r.db.Query("SELECT GR_ID, Receive_Date, IFNULL(Remark, ''), IFNULL(Created_By, ''), UUID FROM Goods_Receipt")
+	rows, err := r.db.Query("SELECT GR_ID, IFNULL(GR_No, ''), Receive_Date, IFNULL(Remark, ''), IFNULL(Created_By, ''), UUID FROM Goods_Receipt")
 	if err != nil {
 		return nil, err
 	}
@@ -860,16 +1272,29 @@ func (r *SQLiteProcurementRepository) GetGoodsReceipts() ([]models.GoodsReceipt,
 	list := []models.GoodsReceipt{}
 	for rows.Next() {
 		var i models.GoodsReceipt
-		rows.Scan(&i.ID, &i.ReceiveDate, &i.Remark, &i.CreatedBy, &i.UUID)
+		rows.Scan(&i.ID, &i.GRNo, &i.ReceiveDate, &i.Remark, &i.CreatedBy, &i.UUID)
 		list = append(list, i)
 	}
 	return list, nil
 }
 
+func (r *SQLiteProcurementRepository) GetGoodsReceiptByID(id int) (*models.GoodsReceipt, error) {
+	var i models.GoodsReceipt
+	err := r.db.QueryRow("SELECT GR_ID, IFNULL(GR_No, ''), Receive_Date, IFNULL(Remark, ''), IFNULL(Created_By, ''), UUID FROM Goods_Receipt WHERE GR_ID = ?", id).
+		Scan(&i.ID, &i.GRNo, &i.ReceiveDate, &i.Remark, &i.CreatedBy, &i.UUID)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &i, nil
+}
+
 func (r *SQLiteProcurementRepository) SaveGoodsReceipt(i *models.GoodsReceipt) error {
 	if i.ID == 0 {
-		res, err := r.db.Exec("INSERT INTO Goods_Receipt (Receive_Date, Remark, Created_By, UUID) VALUES (?, ?, ?, ?)",
-			i.ReceiveDate, i.Remark, i.CreatedBy, i.UUID)
+		res, err := r.db.Exec("INSERT INTO Goods_Receipt (GR_No, Receive_Date, Remark, Created_By, UUID) VALUES (?, ?, ?, ?, ?)",
+			i.GRNo, i.ReceiveDate, i.Remark, i.CreatedBy, i.UUID)
 		if err != nil {
 			return err
 		}
@@ -877,7 +1302,7 @@ func (r *SQLiteProcurementRepository) SaveGoodsReceipt(i *models.GoodsReceipt) e
 		i.ID = int(id)
 		return nil
 	}
-	_, err := r.db.Exec("UPDATE Goods_Receipt SET Receive_Date=?, Remark=? WHERE GR_ID=?", i.ReceiveDate, i.Remark, i.ID)
+	_, err := r.db.Exec("UPDATE Goods_Receipt SET GR_No=?, Receive_Date=?, Remark=? WHERE GR_ID=?", i.GRNo, i.ReceiveDate, i.Remark, i.ID)
 	return err
 }
 
@@ -898,6 +1323,23 @@ func (r *SQLiteProcurementRepository) GetInventoryLots() ([]models.InventoryLot,
 		list = append(list, i)
 	}
 	return list, nil
+}
+
+func (r *SQLiteProcurementRepository) GetInventoryLotByID(id int) (*models.InventoryLot, error) {
+	var i models.InventoryLot
+	var expiryDate *time.Time
+	err := r.db.QueryRow("SELECT Lot_ID, GR_ID, Container_Item_ID, Lot_No, Expiry_Date, IFNULL(Qty, 0), IFNULL(Landed_Cost_Per_Unit, 0), IFNULL(Quarantine_Status, ''), IFNULL(Quarantine_Remark, ''), IFNULL(Remark, ''), UUID FROM Inventory_Lot WHERE Lot_ID = ?", id).
+		Scan(&i.ID, &i.GRID, &i.ContainerItemID, &i.LotNo, &expiryDate, &i.Qty, &i.LandedCostPerUnit, &i.QuarantineStatus, &i.QuarantineRemark, &i.Remark, &i.UUID)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if expiryDate != nil {
+		i.ExpiryDate = *expiryDate
+	}
+	return &i, nil
 }
 
 func (r *SQLiteProcurementRepository) GetInventoryLotsByGRID(grID int) ([]models.InventoryLot, error) {
@@ -977,7 +1419,7 @@ func (r *SQLiteProcurementRepository) SaveCostAllocation(ca *models.CostAllocati
 func (r *SQLiteProcurementRepository) GetContainerItemsByContainerID(containerID int) ([]models.ContainerItem, error) {
 	rows, err := r.db.Query(`
 		SELECT
-			ci.Container_Item_ID, ci.PO_Item_ID, IFNULL(ci.Container_ID, 0), IFNULL(ci.CI_ID, 0), IFNULL(ci.BL_ID, 0),
+			ci.Container_Item_ID, ci.PO_Item_ID, IFNULL(ci.Container_ID, 0), IFNULL(ci.CI_ID, 0), IFNULL(ci.BL_ID, 0), IFNULL(ci.Constraint_Profile_ID, 0),
 			IFNULL(ci.Load_Qty, 0),
 			IFNULL(ci.Gross_Weight, 0), IFNULL(ci.Net_Weight, 0), IFNULL(ci.Cbm, 0), ci.Temporary_ETA, IFNULL(ci.UUID, ''), IFNULL(ci.Remark, '')
 		FROM Container_Item ci
@@ -990,7 +1432,7 @@ func (r *SQLiteProcurementRepository) GetContainerItemsByContainerID(containerID
 	for rows.Next() {
 		var i models.ContainerItem
 		var tempEta *time.Time
-		err := rows.Scan(&i.ID, &i.POItemID, &i.ContainerID, &i.CIID, &i.BLID, &i.LoadQty, &i.GrossWeight, &i.NetWeight, &i.CBM, &tempEta, &i.UUID, &i.Remark)
+		err := rows.Scan(&i.ID, &i.POItemID, &i.ContainerID, &i.CIID, &i.BLID, &i.ConstraintProfileID, &i.LoadQty, &i.GrossWeight, &i.NetWeight, &i.CBM, &tempEta, &i.UUID, &i.Remark)
 		if err != nil {
 			return nil, err
 		}
@@ -1002,14 +1444,37 @@ func (r *SQLiteProcurementRepository) GetContainerItemsByContainerID(containerID
 	return list, nil
 }
 
+func (r *SQLiteProcurementRepository) GetContainerItemByID(id int) (*models.ContainerItem, error) {
+	var i models.ContainerItem
+	var tempEta *time.Time
+	err := r.db.QueryRow(`
+		SELECT
+			ci.Container_Item_ID, ci.PO_Item_ID, IFNULL(ci.Container_ID, 0), IFNULL(ci.CI_ID, 0), IFNULL(ci.BL_ID, 0), IFNULL(ci.Constraint_Profile_ID, 0),
+			IFNULL(ci.Load_Qty, 0),
+			IFNULL(ci.Gross_Weight, 0), IFNULL(ci.Net_Weight, 0), IFNULL(ci.Cbm, 0), ci.Temporary_ETA, IFNULL(ci.UUID, ''), IFNULL(ci.Remark, '')
+		FROM Container_Item ci
+		WHERE ci.Container_Item_ID = ?`, id).
+		Scan(&i.ID, &i.POItemID, &i.ContainerID, &i.CIID, &i.BLID, &i.ConstraintProfileID, &i.LoadQty, &i.GrossWeight, &i.NetWeight, &i.CBM, &tempEta, &i.UUID, &i.Remark)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if tempEta != nil {
+		i.TemporaryETA = *tempEta
+	}
+	return &i, nil
+}
+
 func (r *SQLiteProcurementRepository) SaveContainerItem(i *models.ContainerItem) error {
 	var err error
 	if i.ID == 0 {
-		_, err = r.db.Exec(`INSERT INTO Container_Item (PO_Item_ID, Container_ID, CI_ID, BL_ID, Load_Qty, Gross_Weight, Net_Weight, Cbm, Temporary_ETA, UUID, Remark) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			i.POItemID, i.ContainerID, i.CIID, i.BLID, i.LoadQty, i.GrossWeight, i.NetWeight, i.CBM, nullIfZero(i.TemporaryETA), i.UUID, i.Remark)
+		_, err = r.db.Exec(`INSERT INTO Container_Item (PO_Item_ID, Container_ID, CI_ID, BL_ID, Constraint_Profile_ID, Load_Qty, Gross_Weight, Net_Weight, Cbm, Temporary_ETA, UUID, Remark) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			i.POItemID, i.ContainerID, i.CIID, i.BLID, i.ConstraintProfileID, i.LoadQty, i.GrossWeight, i.NetWeight, i.CBM, nullIfZero(i.TemporaryETA), i.UUID, i.Remark)
 	} else {
-		_, err = r.db.Exec(`UPDATE Container_Item SET PO_Item_ID=?, Container_ID=?, CI_ID=?, BL_ID=?, Load_Qty=?, Gross_Weight=?, Net_Weight=?, Cbm=?, Temporary_ETA=?, UUID=?, Remark=? WHERE Container_Item_ID=?`,
-			i.POItemID, i.ContainerID, i.CIID, i.BLID, i.LoadQty, i.GrossWeight, i.NetWeight, i.CBM, nullIfZero(i.TemporaryETA), i.UUID, i.Remark, i.ID)
+		_, err = r.db.Exec(`UPDATE Container_Item SET PO_Item_ID=?, Container_ID=?, CI_ID=?, BL_ID=?, Constraint_Profile_ID=?, Load_Qty=?, Gross_Weight=?, Net_Weight=?, Cbm=?, Temporary_ETA=?, UUID=?, Remark=? WHERE Container_Item_ID=?`,
+			i.POItemID, i.ContainerID, i.CIID, i.BLID, i.ConstraintProfileID, i.LoadQty, i.GrossWeight, i.NetWeight, i.CBM, nullIfZero(i.TemporaryETA), i.UUID, i.Remark, i.ID)
 	}
 	return err
 }
@@ -1049,6 +1514,11 @@ func (r *SQLiteProcurementRepository) SaveCostAllocationItem(i *models.CostAlloc
 	}
 	_, err := r.db.Exec("UPDATE Cost_Allocation_Item SET Cost_Allocation_ID=?, Lot_ID=?, Allocated_Amount=?, AP_ID=? WHERE Cost_Allocation_Item_ID=?",
 		i.CostAllocationID, i.LotID, i.AllocatedAmount, apID, i.ID)
+	return err
+}
+
+func (r *SQLiteProcurementRepository) DeleteCostAllocationItem(id int) error {
+	_, err := r.db.Exec("DELETE FROM Cost_Allocation_Item WHERE Cost_Allocation_Item_ID = ?", id)
 	return err
 }
 
@@ -1278,30 +1748,23 @@ func (r *SQLiteProcurementRepository) GetAPIDsUsedForLots(lotIDs []int) (map[int
 	return ids, nil
 }
 
-func (r *SQLiteProcurementRepository) GetCostAllocationSummaryByAP(apID int) (float64, []int, error) {
+func (r *SQLiteProcurementRepository) GetCostAllocationAmountsByAP(apID int) (map[int]float64, error) {
 	rows, err := r.db.Query("SELECT Lot_ID, IFNULL(Allocated_Amount, 0) FROM Cost_Allocation_Item WHERE AP_ID = ?", apID)
 	if err != nil {
-		return 0, nil, err
+		return nil, err
 	}
 	defer rows.Close()
 
-	var total float64
-	lotIDMap := make(map[int]bool)
+	m := make(map[int]float64)
 	for rows.Next() {
 		var lotID int
 		var amount float64
 		if err := rows.Scan(&lotID, &amount); err != nil {
-			return 0, nil, err
+			return nil, err
 		}
-		total += amount
-		lotIDMap[lotID] = true
+		m[lotID] += amount
 	}
-
-	lotIDs := make([]int, 0, len(lotIDMap))
-	for id := range lotIDMap {
-		lotIDs = append(lotIDs, id)
-	}
-	return total, lotIDs, nil
+	return m, nil
 }
 
 func (r *SQLiteProcurementRepository) GetCostAllocationWarningByPO(poID int) (*models.POAllocationWarning, error) {
@@ -1325,6 +1788,72 @@ func (r *SQLiteProcurementRepository) GetCostAllocationWarningByPO(poID int) (*m
 	}, nil
 }
 
+func (r *SQLiteProcurementRepository) GetReferenceIDByUUID(refType string, uuid string) (int, error) {
+	var table, col string
+	switch refType {
+	case "PO":
+		table, col = "Purchase_Order", "PO_ID"
+	case "CI":
+		table, col = "Commercial_Invoice", "CI_ID"
+	case "BL":
+		table, col = "BL", "BL_ID"
+	case "Container":
+		table, col = "Container", "Container_ID"
+	case "ContainerItem", "Container Item":
+		table, col = "Container_Item", "Container_Item_ID"
+	case "GR":
+		table, col = "Goods_Receipt", "GR_ID"
+	case "Lot":
+		table, col = "Inventory_Lot", "Lot_ID"
+	default:
+		return 0, nil
+	}
+	var id int
+	err := r.db.QueryRow(fmt.Sprintf("SELECT %s FROM %s WHERE UUID = ?", col, table), uuid).Scan(&id)
+	if err == sql.ErrNoRows {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	return id, nil
+}
+
+// GetReferenceNoByUUID 참조 문서의 표시 번호(GR No, CI No 등)를 UUID로 조회
+func (r *SQLiteProcurementRepository) GetReferenceNoByUUID(refType string, uuid string) (string, error) {
+	var query string
+	switch refType {
+	case "PO":
+		query = "SELECT IFNULL(PO_No, '') FROM Purchase_Order WHERE UUID = ?"
+	case "CI":
+		query = "SELECT IFNULL(CI_No, '') FROM Commercial_Invoice WHERE UUID = ?"
+	case "BL":
+		query = "SELECT IFNULL(BL_No, '') FROM BL WHERE UUID = ?"
+	case "Container":
+		query = "SELECT IFNULL(Container_No, '') FROM Container WHERE UUID = ?"
+	case "ContainerItem", "Container Item":
+		// Container_Item에는 사람이 읽는 번호가 없음
+		return "", nil
+	case "GR":
+		query = "SELECT IFNULL(GR_No, '') FROM Goods_Receipt WHERE UUID = ?"
+	case "Lot":
+		query = "SELECT IFNULL(Lot_No, '') FROM Inventory_Lot WHERE UUID = ?"
+	case "AP_Target_Group":
+		query = "SELECT IFNULL(Group_No, '') FROM AP_Target_Group WHERE UUID = ?"
+	default:
+		return "", nil
+	}
+	var no string
+	err := r.db.QueryRow(query, uuid).Scan(&no)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return no, nil
+}
+
 func (r *SQLiteProcurementRepository) GetCostAllocationReferenceBaseUnits(refType string, refID int) ([]models.CostAllocationBaseUnit, error) {
 	var query string
 	switch refType {
@@ -1332,35 +1861,35 @@ func (r *SQLiteProcurementRepository) GetCostAllocationReferenceBaseUnits(refTyp
 		query = `
 			SELECT IFNULL(PO_Qty, 0), IFNULL(Unit_Price, 0), 0, 0
 			FROM PO_Item
-			WHERE PO_ID = ?
+			WHERE PO_ID = ? AND IFNULL(PO_Qty, 0) > 0
 		`
 	case "CI":
 		query = `
 			SELECT IFNULL(ci.Load_Qty, 0), IFNULL(pi.Unit_Price, 0), IFNULL(ci.Gross_Weight, 0), IFNULL(ci.Cbm, 0)
 			FROM Container_Item ci
 			JOIN PO_Item pi ON ci.PO_Item_ID = pi.PO_Item_ID
-			WHERE ci.CI_ID = ?
+			WHERE ci.CI_ID = ? AND IFNULL(ci.Load_Qty, 0) > 0
 		`
 	case "BL":
 		query = `
 			SELECT IFNULL(ci.Load_Qty, 0), IFNULL(pi.Unit_Price, 0), IFNULL(ci.Gross_Weight, 0), IFNULL(ci.Cbm, 0)
 			FROM Container_Item ci
 			JOIN PO_Item pi ON ci.PO_Item_ID = pi.PO_Item_ID
-			WHERE ci.BL_ID = ?
+			WHERE ci.BL_ID = ? AND IFNULL(ci.Load_Qty, 0) > 0
 		`
 	case "Container":
 		query = `
 			SELECT IFNULL(ci.Load_Qty, 0), IFNULL(pi.Unit_Price, 0), IFNULL(ci.Gross_Weight, 0), IFNULL(ci.Cbm, 0)
 			FROM Container_Item ci
 			JOIN PO_Item pi ON ci.PO_Item_ID = pi.PO_Item_ID
-			WHERE ci.Container_ID = ?
+			WHERE ci.Container_ID = ? AND IFNULL(ci.Load_Qty, 0) > 0
 		`
 	case "ContainerItem", "Container Item":
 		query = `
 			SELECT IFNULL(ci.Load_Qty, 0), IFNULL(pi.Unit_Price, 0), IFNULL(ci.Gross_Weight, 0), IFNULL(ci.Cbm, 0)
 			FROM Container_Item ci
 			JOIN PO_Item pi ON ci.PO_Item_ID = pi.PO_Item_ID
-			WHERE ci.Container_Item_ID = ?
+			WHERE ci.Container_Item_ID = ? AND IFNULL(ci.Load_Qty, 0) > 0
 		`
 	case "GR":
 		query = `
@@ -1370,7 +1899,7 @@ func (r *SQLiteProcurementRepository) GetCostAllocationReferenceBaseUnits(refTyp
 			FROM Inventory_Lot l
 			JOIN Container_Item ci ON l.Container_Item_ID = ci.Container_Item_ID
 			JOIN PO_Item pi ON ci.PO_Item_ID = pi.PO_Item_ID
-			WHERE l.GR_ID = ?
+			WHERE l.GR_ID = ? AND IFNULL(l.Qty, 0) > 0
 		`
 	case "Lot":
 		query = `
@@ -1380,7 +1909,7 @@ func (r *SQLiteProcurementRepository) GetCostAllocationReferenceBaseUnits(refTyp
 			FROM Inventory_Lot l
 			JOIN Container_Item ci ON l.Container_Item_ID = ci.Container_Item_ID
 			JOIN PO_Item pi ON ci.PO_Item_ID = pi.PO_Item_ID
-			WHERE l.Lot_ID = ?
+			WHERE l.Lot_ID = ? AND IFNULL(l.Qty, 0) > 0
 		`
 	default:
 		return []models.CostAllocationBaseUnit{}, nil
@@ -1497,6 +2026,8 @@ func (r *SQLiteProcurementRepository) GetBookings() ([]models.BookingView, error
 			IFNULL(ci.Gross_Weight, 0),
 			IFNULL(ci.Net_Weight, 0),
 			IFNULL(ci.Cbm, 0),
+			CASE WHEN IFNULL(ci.Load_Qty, 0) > 0 THEN IFNULL(ci.Cbm, 0) / ci.Load_Qty ELSE 0 END as Unit_CBM,
+			IFNULL(im.CBM, 0) as Master_CBM,
 			ci.Temporary_ETA,
 			IFNULL(ci.Remark, '')
 		FROM Container_Item ci
@@ -1533,7 +2064,7 @@ func (r *SQLiteProcurementRepository) GetBookings() ([]models.BookingView, error
 			&b.BLID, &b.BLNo, &b.BLStatus, &etd, &eta,
 			&b.POL, &b.POD, &b.Carrier, &b.VesselName,
 			&b.POItemID, &b.POID, &b.PONo, &b.ItemID, &b.ItemName, &b.CIID, &b.CINo, &b.LoadQty,
-			&b.GrossWeight, &b.NetWeight, &b.CBM, &tempEta, &b.Remark,
+			&b.GrossWeight, &b.NetWeight, &b.CBM, &b.UnitCBM, &b.MasterCBM, &tempEta, &b.Remark,
 		)
 		if err != nil {
 			return nil, err
@@ -1564,7 +2095,6 @@ func (r *SQLiteProcurementRepository) GetAPTargetGroups() ([]models.AP_TargetGro
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 
 	list := []models.AP_TargetGroup{}
 	for rows.Next() {
@@ -1572,9 +2102,17 @@ func (r *SQLiteProcurementRepository) GetAPTargetGroups() ([]models.AP_TargetGro
 		err := rows.Scan(&g.ID, &g.GroupNo, &g.GroupName, &g.ReferenceType, &g.Status, &g.Remark,
 			&g.CreatedBy, &g.CreatedAt, &g.UpdatedBy, &g.UpdatedAt, &g.UUID)
 		if err != nil {
+			rows.Close()
 			return nil, err
 		}
 		list = append(list, g)
+	}
+	rows.Close()
+
+	// 각 그룹의 참조 항목(items)을 함께 로드
+	for i := range list {
+		items, _ := r.GetAPTargetGroupItems(list[i].ID)
+		list[i].Items = items
 	}
 	return list, nil
 }
@@ -1661,6 +2199,247 @@ func (r *SQLiteProcurementRepository) SaveAPTargetGroupItem(item *models.AP_Targ
 
 func (r *SQLiteProcurementRepository) DeleteAPTargetGroupItem(id int) error {
 	_, err := r.db.Exec("DELETE FROM AP_Target_Group_Item WHERE Group_Item_ID = ?", id)
+	return err
+}
+
+// Constraint Profile (행정 제약 프로파일)
+func (r *SQLiteProcurementRepository) GetConstraintProfiles() ([]models.ConstraintProfile, error) {
+	rows, err := r.db.Query(`
+		SELECT Profile_ID, Profile_No, IFNULL(Name, ''), IFNULL(Remark, ''),
+		       IFNULL(Created_By, ''), Created_At, IFNULL(Updated_By, ''), Updated_At, UUID
+		FROM Constraint_Profile ORDER BY Created_At DESC`)
+	if err != nil {
+		return nil, err
+	}
+	list := []models.ConstraintProfile{}
+	for rows.Next() {
+		var p models.ConstraintProfile
+		if err := rows.Scan(&p.ID, &p.ProfileNo, &p.Name, &p.Remark,
+			&p.CreatedBy, &p.CreatedAt, &p.UpdatedBy, &p.UpdatedAt, &p.UUID); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		list = append(list, p)
+	}
+	rows.Close()
+	for i := range list {
+		steps, _ := r.GetConstraintProfileSteps(list[i].ID)
+		list[i].Steps = steps
+	}
+	return list, nil
+}
+
+func (r *SQLiteProcurementRepository) GetConstraintProfileByID(id int) (*models.ConstraintProfile, error) {
+	var p models.ConstraintProfile
+	err := r.db.QueryRow(`
+		SELECT Profile_ID, Profile_No, IFNULL(Name, ''), IFNULL(Remark, ''),
+		       IFNULL(Created_By, ''), Created_At, IFNULL(Updated_By, ''), Updated_At, UUID
+		FROM Constraint_Profile WHERE Profile_ID = ?`, id).
+		Scan(&p.ID, &p.ProfileNo, &p.Name, &p.Remark,
+			&p.CreatedBy, &p.CreatedAt, &p.UpdatedBy, &p.UpdatedAt, &p.UUID)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	steps, _ := r.GetConstraintProfileSteps(id)
+	p.Steps = steps
+	return &p, nil
+}
+
+func (r *SQLiteProcurementRepository) GetConstraintProfileSteps(profileID int) ([]models.ConstraintProfileStep, error) {
+	rows, err := r.db.Query(`
+		SELECT Step_ID, Profile_ID, IFNULL(Constraint_ID, 0), IFNULL(Sequence, 0), IFNULL(Constraint_Type, ''),
+		       IFNULL(Lead_Time_Days, 0), IFNULL(Is_Optional, 0), IFNULL(Remark, '')
+		FROM Constraint_Profile_Step WHERE Profile_ID = ? ORDER BY Sequence, Step_ID`, profileID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	list := []models.ConstraintProfileStep{}
+	for rows.Next() {
+		var s models.ConstraintProfileStep
+		var opt int
+		if err := rows.Scan(&s.ID, &s.ProfileID, &s.ConstraintID, &s.Sequence, &s.ConstraintType, &s.LeadTimeDays, &opt, &s.Remark); err != nil {
+			return nil, err
+		}
+		s.IsOptional = opt != 0
+		list = append(list, s)
+	}
+	return list, nil
+}
+
+func (r *SQLiteProcurementRepository) SaveConstraintProfile(p *models.ConstraintProfile) error {
+	if p.ID == 0 {
+		res, err := r.db.Exec(`
+			INSERT INTO Constraint_Profile (Profile_No, Name, Remark, Created_By, UUID)
+			VALUES (?, ?, ?, ?, ?)`,
+			p.ProfileNo, p.Name, p.Remark, p.CreatedBy, p.UUID)
+		if err != nil {
+			return err
+		}
+		id, _ := res.LastInsertId()
+		p.ID = int(id)
+		return nil
+	}
+	_, err := r.db.Exec(`
+		UPDATE Constraint_Profile SET Profile_No=?, Name=?, Remark=?, Updated_By=?, Updated_At=CURRENT_TIMESTAMP
+		WHERE Profile_ID=?`,
+		p.ProfileNo, p.Name, p.Remark, p.UpdatedBy, p.ID)
+	return err
+}
+
+func (r *SQLiteProcurementRepository) SaveConstraintProfileStep(s *models.ConstraintProfileStep) error {
+	opt := 0
+	if s.IsOptional {
+		opt = 1
+	}
+	if s.ID == 0 {
+		res, err := r.db.Exec(`
+			INSERT INTO Constraint_Profile_Step (Profile_ID, Constraint_ID, Sequence, Constraint_Type, Lead_Time_Days, Is_Optional, Remark)
+			VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			s.ProfileID, s.ConstraintID, s.Sequence, s.ConstraintType, s.LeadTimeDays, opt, s.Remark)
+		if err != nil {
+			return err
+		}
+		id, _ := res.LastInsertId()
+		s.ID = int(id)
+		return nil
+	}
+	_, err := r.db.Exec(`
+		UPDATE Constraint_Profile_Step SET Profile_ID=?, Constraint_ID=?, Sequence=?, Constraint_Type=?, Lead_Time_Days=?, Is_Optional=?, Remark=?
+		WHERE Step_ID=?`,
+		s.ProfileID, s.ConstraintID, s.Sequence, s.ConstraintType, s.LeadTimeDays, opt, s.Remark, s.ID)
+	return err
+}
+
+func (r *SQLiteProcurementRepository) DeleteConstraintProfileStep(id int) error {
+	_, err := r.db.Exec("DELETE FROM Constraint_Profile_Step WHERE Step_ID = ?", id)
+	return err
+}
+
+// Constraint Master (개별 제약 카탈로그)
+func (r *SQLiteProcurementRepository) GetConstraints() ([]models.ConstraintMaster, error) {
+	rows, err := r.db.Query(`SELECT Constraint_ID, IFNULL(Name, ''), IFNULL(Lead_Time_Days, 0), IFNULL(Remark, ''), IFNULL(Created_By, ''), Created_At, IFNULL(Updated_By, ''), Updated_At FROM Constraint_Master ORDER BY Name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	list := []models.ConstraintMaster{}
+	for rows.Next() {
+		var c models.ConstraintMaster
+		if err := rows.Scan(&c.ID, &c.Name, &c.LeadTimeDays, &c.Remark, &c.CreatedBy, &c.CreatedAt, &c.UpdatedBy, &c.UpdatedAt); err != nil {
+			return nil, err
+		}
+		list = append(list, c)
+	}
+	return list, nil
+}
+
+func (r *SQLiteProcurementRepository) GetConstraintMasterByID(id int) (*models.ConstraintMaster, error) {
+	var c models.ConstraintMaster
+	err := r.db.QueryRow(`SELECT Constraint_ID, IFNULL(Name, ''), IFNULL(Lead_Time_Days, 0), IFNULL(Remark, ''), IFNULL(Created_By, ''), Created_At, IFNULL(Updated_By, ''), Updated_At FROM Constraint_Master WHERE Constraint_ID = ?`, id).
+		Scan(&c.ID, &c.Name, &c.LeadTimeDays, &c.Remark, &c.CreatedBy, &c.CreatedAt, &c.UpdatedBy, &c.UpdatedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &c, nil
+}
+
+func (r *SQLiteProcurementRepository) SaveConstraintMaster(c *models.ConstraintMaster) error {
+	if c.ID == 0 {
+		res, err := r.db.Exec(`INSERT INTO Constraint_Master (Name, Lead_Time_Days, Remark, Created_By) VALUES (?, ?, ?, ?)`,
+			c.Name, c.LeadTimeDays, c.Remark, c.CreatedBy)
+		if err != nil {
+			return err
+		}
+		id, _ := res.LastInsertId()
+		c.ID = int(id)
+		return nil
+	}
+	_, err := r.db.Exec(`UPDATE Constraint_Master SET Name=?, Lead_Time_Days=?, Remark=?, Updated_By=?, Updated_At=CURRENT_TIMESTAMP WHERE Constraint_ID=?`,
+		c.Name, c.LeadTimeDays, c.Remark, c.UpdatedBy, c.ID)
+	return err
+}
+
+// Constraint Instance (Lot별 행정 제약 인스턴스)
+func (r *SQLiteProcurementRepository) GetConstraintInstances(lotID int) ([]models.ConstraintInstance, error) {
+	rows, err := r.db.Query(`
+		SELECT Instance_ID, Lot_ID, IFNULL(Source_Container_Item_ID, 0), IFNULL(Profile_ID, 0), IFNULL(Predecessor_ID, 0), IFNULL(Sequence, 0),
+		       IFNULL(Constraint_Type, ''), IFNULL(Lead_Time_Days, 0), IFNULL(Is_Optional, 0),
+		       Planned_Start, Actual_Start, Planned_End, Actual_End, IFNULL(Status, 'Planned'), IFNULL(Remark, ''),
+		       IFNULL(Created_By, ''), Created_At, IFNULL(Updated_By, ''), Updated_At
+		FROM Constraint_Instance WHERE Lot_ID = ? ORDER BY Sequence, Instance_ID`, lotID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	list := []models.ConstraintInstance{}
+	for rows.Next() {
+		var s models.ConstraintInstance
+		var opt int
+		var ps, as, pe, ae sql.NullTime
+		if err := rows.Scan(&s.ID, &s.LotID, &s.SourceContainerItemID, &s.ProfileID, &s.PredecessorID, &s.Sequence,
+			&s.ConstraintType, &s.LeadTimeDays, &opt, &ps, &as, &pe, &ae, &s.Status, &s.Remark,
+			&s.CreatedBy, &s.CreatedAt, &s.UpdatedBy, &s.UpdatedAt); err != nil {
+			return nil, err
+		}
+		s.IsOptional = opt != 0
+		if ps.Valid {
+			s.PlannedStart = ps.Time
+		}
+		if as.Valid {
+			s.ActualStart = as.Time
+		}
+		if pe.Valid {
+			s.PlannedEnd = pe.Time
+		}
+		if ae.Valid {
+			s.ActualEnd = ae.Time
+		}
+		list = append(list, s)
+	}
+	return list, nil
+}
+
+func (r *SQLiteProcurementRepository) SaveConstraintInstance(s *models.ConstraintInstance) error {
+	opt := 0
+	if s.IsOptional {
+		opt = 1
+	}
+	if s.Status == "" {
+		s.Status = "Planned"
+	}
+	if s.ID == 0 {
+		res, err := r.db.Exec(`
+			INSERT INTO Constraint_Instance
+			(Lot_ID, Source_Container_Item_ID, Profile_ID, Predecessor_ID, Sequence, Constraint_Type, Lead_Time_Days, Is_Optional,
+			 Planned_Start, Actual_Start, Planned_End, Actual_End, Status, Remark, Created_By)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			s.LotID, s.SourceContainerItemID, s.ProfileID, s.PredecessorID, s.Sequence, s.ConstraintType, s.LeadTimeDays, opt,
+			nullIfZero(s.PlannedStart), nullIfZero(s.ActualStart), nullIfZero(s.PlannedEnd), nullIfZero(s.ActualEnd), s.Status, s.Remark, s.CreatedBy)
+		if err != nil {
+			return err
+		}
+		id, _ := res.LastInsertId()
+		s.ID = int(id)
+		return nil
+	}
+	_, err := r.db.Exec(`
+		UPDATE Constraint_Instance SET Lot_ID=?, Source_Container_Item_ID=?, Profile_ID=?, Predecessor_ID=?, Sequence=?, Constraint_Type=?, Lead_Time_Days=?, Is_Optional=?,
+			Planned_Start=?, Actual_Start=?, Planned_End=?, Actual_End=?, Status=?, Remark=?, Updated_By=?, Updated_At=CURRENT_TIMESTAMP
+		WHERE Instance_ID=?`,
+		s.LotID, s.SourceContainerItemID, s.ProfileID, s.PredecessorID, s.Sequence, s.ConstraintType, s.LeadTimeDays, opt,
+		nullIfZero(s.PlannedStart), nullIfZero(s.ActualStart), nullIfZero(s.PlannedEnd), nullIfZero(s.ActualEnd), s.Status, s.Remark, s.UpdatedBy, s.ID)
+	return err
+}
+
+func (r *SQLiteProcurementRepository) DeleteConstraintInstance(id int) error {
+	_, err := r.db.Exec("DELETE FROM Constraint_Instance WHERE Instance_ID = ?", id)
 	return err
 }
 
@@ -1773,17 +2552,21 @@ func (r *SQLiteProcurementRepository) GetAllReferenceTargets() ([]models.APTarge
 	}
 
 	// GR
-	rows, err = r.db.Query("SELECT GR_ID, Receive_Date, Remark, UUID FROM Goods_Receipt")
+	rows, err = r.db.Query("SELECT GR_ID, IFNULL(GR_No, ''), Receive_Date, Remark, UUID FROM Goods_Receipt")
 	if err == nil {
 		defer rows.Close()
 		for rows.Next() {
 			var id int
-			var date, remark, uuid string
-			if err := rows.Scan(&id, &date, &remark, &uuid); err == nil {
+			var grNo, date, remark, uuid string
+			if err := rows.Scan(&id, &grNo, &date, &remark, &uuid); err == nil {
+				refNo := grNo
+				if refNo == "" {
+					refNo = fmt.Sprintf("GR-%d", id)
+				}
 				list = append(list, models.APTargetGroupReference{
 					ReferenceUUID: uuid,
 					ReferenceType: "GR",
-					ReferenceNo:   fmt.Sprintf("GR-%d", id),
+					ReferenceNo:   refNo,
 					Description:   fmt.Sprintf("GR #%d (%s)", id, date),
 				})
 			}
@@ -1824,7 +2607,7 @@ func (r *SQLiteProcurementRepository) CheckReferences(tableName string, id int) 
 	}
 
 	var checks []refCheck
-	var groupUUID string
+	var refUUID string
 
 	switch tableName {
 	case "Item_Master":
@@ -1842,9 +2625,12 @@ func (r *SQLiteProcurementRepository) CheckReferences(tableName string, id int) 
 				query: "SELECT AP_ID, AP_No, Status FROM Account_Payable WHERE Vendor_ID = ?"},
 		}
 	case "Purchase_Order":
+		r.db.QueryRow("SELECT UUID FROM Purchase_Order WHERE PO_ID = ?", id).Scan(&refUUID)
 		checks = []refCheck{
 			{table: "PO_Item", column: "PO_ID", label: "PO Items",
 				query: "SELECT PO_Item_ID, Item_ID, PO_Qty FROM PO_Item WHERE PO_ID = ?"},
+			{table: "Account_Payable", column: "Reference_UUID", label: "Linked Account Payables",
+				query: "SELECT AP_ID, AP_No, Status FROM Account_Payable WHERE Reference_UUID = ?"},
 		}
 	case "PO_Item":
 		checks = []refCheck{
@@ -1852,34 +2638,52 @@ func (r *SQLiteProcurementRepository) CheckReferences(tableName string, id int) 
 				query: "SELECT Container_Item_ID, Container_ID, Load_Qty FROM Container_Item WHERE PO_Item_ID = ?"},
 		}
 	case "Commercial_Invoice":
+		r.db.QueryRow("SELECT UUID FROM Commercial_Invoice WHERE CI_ID = ?", id).Scan(&refUUID)
 		checks = []refCheck{
 			{table: "Container_Item", column: "CI_ID", label: "Container Items (Bookings)",
 				query: "SELECT Container_Item_ID, PO_Item_ID, Load_Qty FROM Container_Item WHERE CI_ID = ?"},
+			{table: "Account_Payable", column: "Reference_UUID", label: "Linked Account Payables",
+				query: "SELECT AP_ID, AP_No, Status FROM Account_Payable WHERE Reference_UUID = ?"},
 		}
 	case "Container":
+		r.db.QueryRow("SELECT UUID FROM Container WHERE Container_ID = ?", id).Scan(&refUUID)
 		checks = []refCheck{
 			{table: "Container_Item", column: "Container_ID", label: "Container Items (Bookings)",
 				query: "SELECT Container_Item_ID, PO_Item_ID, Load_Qty FROM Container_Item WHERE Container_ID = ?"},
+			{table: "Account_Payable", column: "Reference_UUID", label: "Linked Account Payables",
+				query: "SELECT AP_ID, AP_No, Status FROM Account_Payable WHERE Reference_UUID = ?"},
 		}
 	case "BL":
+		r.db.QueryRow("SELECT UUID FROM BL WHERE BL_ID = ?", id).Scan(&refUUID)
 		checks = []refCheck{
 			{table: "Container_Item", column: "BL_ID", label: "Container Items (Bookings)",
 				query: "SELECT Container_Item_ID, PO_Item_ID, Load_Qty FROM Container_Item WHERE BL_ID = ?"},
+			{table: "Account_Payable", column: "Reference_UUID", label: "Linked Account Payables",
+				query: "SELECT AP_ID, AP_No, Status FROM Account_Payable WHERE Reference_UUID = ?"},
 		}
 	case "Container_Item":
+		r.db.QueryRow("SELECT UUID FROM Container_Item WHERE Container_Item_ID = ?", id).Scan(&refUUID)
 		checks = []refCheck{
 			{table: "Inventory_Lot", column: "Container_Item_ID", label: "Inventory Lots",
 				query: "SELECT Lot_ID, Lot_No, Qty FROM Inventory_Lot WHERE Container_Item_ID = ?"},
+			{table: "Account_Payable", column: "Reference_UUID", label: "Linked Account Payables",
+				query: "SELECT AP_ID, AP_No, Status FROM Account_Payable WHERE Reference_UUID = ?"},
 		}
 	case "Goods_Receipt":
+		r.db.QueryRow("SELECT UUID FROM Goods_Receipt WHERE GR_ID = ?", id).Scan(&refUUID)
 		checks = []refCheck{
 			{table: "Inventory_Lot", column: "GR_ID", label: "Inventory Lots",
 				query: "SELECT Lot_ID, Lot_No, Qty FROM Inventory_Lot WHERE GR_ID = ?"},
+			{table: "Account_Payable", column: "Reference_UUID", label: "Linked Account Payables",
+				query: "SELECT AP_ID, AP_No, Status FROM Account_Payable WHERE Reference_UUID = ?"},
 		}
 	case "Inventory_Lot":
+		r.db.QueryRow("SELECT UUID FROM Inventory_Lot WHERE Lot_ID = ?", id).Scan(&refUUID)
 		checks = []refCheck{
 			{table: "Cost_Allocation_Item", column: "Lot_ID", label: "Cost Allocation Items",
 				query: "SELECT Cost_Allocation_Item_ID, Cost_Allocation_ID, Allocated_Amount FROM Cost_Allocation_Item WHERE Lot_ID = ?"},
+			{table: "Account_Payable", column: "Reference_UUID", label: "Linked Account Payables",
+				query: "SELECT AP_ID, AP_No, Status FROM Account_Payable WHERE Reference_UUID = ?"},
 		}
 	case "Account_Payable":
 		checks = []refCheck{
@@ -1892,7 +2696,7 @@ func (r *SQLiteProcurementRepository) CheckReferences(tableName string, id int) 
 				query: "SELECT Cost_Allocation_Item_ID, Lot_ID, Allocated_Amount FROM Cost_Allocation_Item WHERE Cost_Allocation_ID = ?"},
 		}
 	case "AP_Target_Group":
-		if err := r.db.QueryRow("SELECT UUID FROM AP_Target_Group WHERE Group_ID = ?", id).Scan(&groupUUID); err != nil {
+		if err := r.db.QueryRow("SELECT UUID FROM AP_Target_Group WHERE Group_ID = ?", id).Scan(&refUUID); err != nil {
 			return result, nil
 		}
 		checks = []refCheck{
@@ -1905,8 +2709,8 @@ func (r *SQLiteProcurementRepository) CheckReferences(tableName string, id int) 
 
 	for _, check := range checks {
 		param := interface{}(id)
-		if tableName == "AP_Target_Group" {
-			param = groupUUID
+		if refUUID != "" && check.column == "Reference_UUID" {
+			param = refUUID
 		}
 		rows, err := r.db.Query(check.query, param)
 		if err != nil {
@@ -1975,6 +2779,7 @@ func (r *SQLiteProcurementRepository) DeleteRecord(tableName string, id int) err
 	case "Goods_Receipt":
 		query = "DELETE FROM Goods_Receipt WHERE GR_ID = ?"
 	case "Inventory_Lot":
+		_, _ = r.db.Exec("DELETE FROM Constraint_Instance WHERE Lot_ID = ?", id)
 		query = "DELETE FROM Inventory_Lot WHERE Lot_ID = ?"
 	case "Account_Payable":
 		query = "DELETE FROM Account_Payable WHERE AP_ID = ?"
@@ -1985,6 +2790,11 @@ func (r *SQLiteProcurementRepository) DeleteRecord(tableName string, id int) err
 		query = "DELETE FROM Cost_Allocation_Item WHERE Cost_Allocation_Item_ID = ?"
 	case "AP_Target_Group":
 		query = "DELETE FROM AP_Target_Group WHERE Group_ID = ?"
+	case "Constraint_Profile":
+		_, _ = r.db.Exec("DELETE FROM Constraint_Profile_Step WHERE Profile_ID = ?", id)
+		query = "DELETE FROM Constraint_Profile WHERE Profile_ID = ?"
+	case "Constraint_Master":
+		query = "DELETE FROM Constraint_Master WHERE Constraint_ID = ?"
 	default:
 		return fmt.Errorf("unsupported table: %s", tableName)
 	}

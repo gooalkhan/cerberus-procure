@@ -1,10 +1,11 @@
 import { 
-  ItemMaster, VendorMaster, PurchaseOrder, POItem, POAllocationWarning,
+  ItemMaster, VendorMaster, PurchaseOrder, POItem, POAllocationWarning, POItemAdjustment,
   CommercialInvoice, CIAggregatedItem, AccountPayable, Container, 
   ContainerItem, BL, GoodsReceipt, InventoryLot, 
   CostAllocation, CostAllocationItem, CostAllocationLotCandidate, CostAllocationProposal,
   BookingView, BookingTemplateRow, BulkImportRow,
-  AP_TargetGroup, AP_TargetGroupItem, APTargetGroupReference
+  AP_TargetGroup, AP_TargetGroupItem, APTargetGroupReference,
+  ConstraintProfile, ConstraintAvailability, ConstraintInstance, LotConstraintSchedule, ConstraintMaster
 } from './models';
 
 declare global {
@@ -21,6 +22,10 @@ declare global {
       savePOItem: (json: string) => Promise<void>;
       deletePOItem: (id: number) => Promise<void>;
       getPOAllocationWarning: (poId: number) => Promise<string>;
+      getPOEditLock: (poId: number) => Promise<string>;
+      getPOItemAdjustments: (poItemId: number) => Promise<string>;
+      getPOItemAdjustmentsByPO: (poId: number) => Promise<string>;
+      adjustPOItemQty: (json: string) => Promise<string>;
       getCommercialInvoices: () => Promise<string>;
       getCIAggregatedItems: (ciId: number) => Promise<string>;
       saveCommercialInvoice: (json: string) => Promise<void>;
@@ -54,6 +59,17 @@ declare global {
       saveAPTargetGroupItem: (json: string) => Promise<string>;
       deleteAPTargetGroupItem: (id: number) => Promise<void>;
       getAPTargetGroupReferences: () => Promise<string>;
+      getReferenceNo: (type: string, uuid: string) => Promise<string>;
+      getConstraintProfiles: () => Promise<string>;
+      saveConstraintProfile: (json: string) => Promise<string>;
+      getConstraints: () => Promise<string>;
+      saveConstraint: (json: string) => Promise<string>;
+      getConstraintAvailability: (containerItemId: number) => Promise<string>;
+      getConstraintInstances: (lotId: number) => Promise<string>;
+      saveConstraintInstance: (json: string) => Promise<string>;
+      deleteConstraintInstance: (id: number) => Promise<void>;
+      getConstraintSchedule: (lotId: number) => Promise<string>;
+      bulkAppendConstraint: (json: string) => Promise<void>;
     };
   }
 }
@@ -149,6 +165,27 @@ export const procureApi = {
   getPOAllocationWarning: async (poId: number): Promise<POAllocationWarning> => {
     if (isWasm()) return JSON.parse(await window.procureApi.getPOAllocationWarning(poId));
     return request<POAllocationWarning>(`/pos/allocation-warning?poId=${poId}`);
+  },
+  getPOEditLock: async (poId: number): Promise<{ locked: boolean; has_ap: boolean; has_container_item: boolean }> => {
+    if (isWasm()) return JSON.parse(await window.procureApi.getPOEditLock(poId));
+    return request<{ locked: boolean; has_ap: boolean; has_container_item: boolean }>(`/pos/edit-lock?poId=${poId}`);
+  },
+  getPOItemAdjustments: async (poItemId: number): Promise<POItemAdjustment[]> => {
+    if (isWasm()) return JSON.parse(await window.procureApi.getPOItemAdjustments(poItemId));
+    return request<POItemAdjustment[]>(`/po-item-adjustments?poItemId=${poItemId}`);
+  },
+  getPOItemAdjustmentsByPO: async (poId: number): Promise<POItemAdjustment[]> => {
+    if (isWasm()) return JSON.parse(await window.procureApi.getPOItemAdjustmentsByPO(poId));
+    return request<POItemAdjustment[]>(`/po-item-adjustments?poId=${poId}`);
+  },
+  adjustPOItemQty: async (adj: POItemAdjustment): Promise<POItemAdjustment> => {
+    if (isWasm()) return JSON.parse(await window.procureApi.adjustPOItemQty(JSON.stringify(adj)));
+    return request<POItemAdjustment>('/po-item-adjustments', 'POST', adj);
+  },
+  adjustPOItemPrice: async (adj: POItemAdjustment): Promise<POItemAdjustment> => {
+    const payload = { ...adj, kind: 'PRICE' };
+    if (isWasm()) return JSON.parse(await window.procureApi.adjustPOItemQty(JSON.stringify(payload)));
+    return request<POItemAdjustment>('/po-item-adjustments', 'POST', payload);
   },
 
   // Invoices
@@ -300,6 +337,17 @@ export const procureApi = {
     return request<AP_TargetGroup[]>('/ap-target-groups');
   },
 
+  // 참조 문서의 표시 번호(GR No, CI No 등) 조회
+  getReferenceNo: async (type: string, uuid: string): Promise<string> => {
+    if (!type || !uuid) return '';
+    if (isWasm()) {
+      const res = JSON.parse(await window.procureApi.getReferenceNo(type, uuid));
+      return res?.reference_no || '';
+    }
+    const res = await request<{ reference_no: string }>(`/reference-no?type=${encodeURIComponent(type)}&uuid=${encodeURIComponent(uuid)}`);
+    return res?.reference_no || '';
+  },
+
   saveAPTargetGroup: async (g: AP_TargetGroup): Promise<AP_TargetGroup> => {
     if (isWasm()) return JSON.parse(await window.procureApi.saveAPTargetGroup(JSON.stringify(g)));
     return request<AP_TargetGroup>('/ap-target-groups', 'POST', g);
@@ -318,5 +366,59 @@ export const procureApi = {
   getAPTargetGroupReferences: async (): Promise<APTargetGroupReference[]> => {
     if (isWasm()) return JSON.parse(await window.procureApi.getAPTargetGroupReferences());
     return request<APTargetGroupReference[]>('/ap-target-groups/references');
+  },
+
+  // Constraint Profile (행정 제약 프로파일)
+  getConstraintProfiles: async (): Promise<ConstraintProfile[]> => {
+    if (isWasm()) return JSON.parse(await window.procureApi.getConstraintProfiles());
+    return request<ConstraintProfile[]>('/constraint-profiles');
+  },
+
+  saveConstraintProfile: async (p: ConstraintProfile): Promise<ConstraintProfile> => {
+    if (isWasm()) return JSON.parse(await window.procureApi.saveConstraintProfile(JSON.stringify(p)));
+    return request<ConstraintProfile>('/constraint-profiles', 'POST', p);
+  },
+
+  // Constraint Master (개별 제약 카탈로그)
+  getConstraints: async (): Promise<ConstraintMaster[]> => {
+    if (isWasm()) return JSON.parse(await window.procureApi.getConstraints());
+    return request<ConstraintMaster[]>('/constraints');
+  },
+
+  saveConstraint: async (c: ConstraintMaster): Promise<ConstraintMaster> => {
+    if (isWasm()) return JSON.parse(await window.procureApi.saveConstraint(JSON.stringify(c)));
+    return request<ConstraintMaster>('/constraints', 'POST', c);
+  },
+
+  getConstraintAvailability: async (containerItemId: number): Promise<ConstraintAvailability> => {
+    if (isWasm()) return JSON.parse(await window.procureApi.getConstraintAvailability(containerItemId));
+    return request<ConstraintAvailability>(`/constraint-availability?containerItemId=${containerItemId}`);
+  },
+
+  // Constraint Instance (Lot별 제약 인스턴스)
+  getConstraintInstances: async (lotId: number): Promise<ConstraintInstance[]> => {
+    if (isWasm()) return JSON.parse(await window.procureApi.getConstraintInstances(lotId));
+    return request<ConstraintInstance[]>(`/constraint-instances?lotId=${lotId}`);
+  },
+
+  saveConstraintInstance: async (inst: ConstraintInstance): Promise<ConstraintInstance> => {
+    if (isWasm()) return JSON.parse(await window.procureApi.saveConstraintInstance(JSON.stringify(inst)));
+    return request<ConstraintInstance>('/constraint-instances', 'POST', inst);
+  },
+
+  deleteConstraintInstance: async (id: number): Promise<void> => {
+    if (isWasm()) return window.procureApi.deleteConstraintInstance(id);
+    return request(`/constraint-instances?id=${id}`, 'DELETE');
+  },
+
+  getConstraintSchedule: async (lotId: number): Promise<LotConstraintSchedule> => {
+    if (isWasm()) return JSON.parse(await window.procureApi.getConstraintSchedule(lotId));
+    return request<LotConstraintSchedule>(`/constraint-schedule?lotId=${lotId}`);
+  },
+
+  bulkAppendConstraint: async (containerItemId: number, constraintType: string, leadTimeDays: number): Promise<void> => {
+    const body = { container_item_id: containerItemId, constraint_type: constraintType, lead_time_days: leadTimeDays };
+    if (isWasm()) return window.procureApi.bulkAppendConstraint(JSON.stringify(body));
+    return request('/constraint-bulk-append', 'POST', body);
   },
 };

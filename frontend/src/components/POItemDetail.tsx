@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { POItem, PurchaseOrder, POAllocationWarning } from '../api/models';
+import { POItem, PurchaseOrder, POAllocationWarning, POItemAdjustment } from '../api/models';
 import { procureApi } from '../api/procureApi';
 import SearchModal from './SearchModal';
 
@@ -23,6 +23,41 @@ const POItemDetail: React.FC<POItemDetailProps> = ({ po, onChange }) => {
   const [itemSearchOpen, setItemSearchOpen] = useState(false);
   const [itemMasterMap, setItemMasterMap] = useState<Map<number, { name: string; sku_code: string }>>(new Map());
   const [allocationWarning, setAllocationWarning] = useState<POAllocationWarning | null>(null);
+  const [lockInfo, setLockInfo] = useState<{ locked: boolean; has_ap: boolean; has_container_item: boolean } | null>(null);
+  const [adjustItem, setAdjustItem] = useState<POItem | null>(null);
+  const [adjustDelta, setAdjustDelta] = useState('');
+  const [adjustReason, setAdjustReason] = useState('');
+  const [adjustHistory, setAdjustHistory] = useState<POItemAdjustment[]>([]);
+  const [adjustSaving, setAdjustSaving] = useState(false);
+  const [adjustmentsMap, setAdjustmentsMap] = useState<Map<number, POItemAdjustment[]>>(new Map());
+  const [adjustRefresh, setAdjustRefresh] = useState(0);
+  const [expandedItems, setExpandedItems] = useState<Set<number>>(new Set());
+
+  const isLocked = !!lockInfo?.locked;
+
+  const loadAdjustments = async (_list: POItem[]) => {
+    if (!po.po_id) {
+      setAdjustmentsMap(new Map());
+      return;
+    }
+    try {
+      const all = await procureApi.getPOItemAdjustmentsByPO(po.po_id);
+      const m = new Map<number, POItemAdjustment[]>();
+      all.forEach(a => {
+        const arr = m.get(a.po_item_id) || [];
+        arr.push(a);
+        m.set(a.po_item_id, arr);
+      });
+      setAdjustmentsMap(m);
+    } catch (e) {
+      // ignore
+    }
+  };
+
+  useEffect(() => {
+    loadAdjustments(items);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items.map(i => i.po_item_id).join(','), adjustRefresh]);
 
   useEffect(() => {
     if (po.po_id && (!po.items || po.items.length === 0)) {
@@ -33,8 +68,10 @@ const POItemDetail: React.FC<POItemDetailProps> = ({ po, onChange }) => {
   useEffect(() => {
     if (po.po_id) {
       procureApi.getPOAllocationWarning(po.po_id).then(setAllocationWarning).catch(() => setAllocationWarning(null));
+      procureApi.getPOEditLock(po.po_id).then(setLockInfo).catch(() => setLockInfo(null));
     } else {
       setAllocationWarning(null);
+      setLockInfo(null);
     }
   }, [po.po_id]);
 
@@ -115,6 +152,7 @@ const POItemDetail: React.FC<POItemDetailProps> = ({ po, onChange }) => {
       po_item_id: 0,
       po_id: po.po_id,
       item_id: selectedItem.item_id,
+      base_qty: 0,
       po_qty: 0,
       unit_price: 0,
       status: 'Not Shipped',
@@ -130,6 +168,52 @@ const POItemDetail: React.FC<POItemDetailProps> = ({ po, onChange }) => {
     const newItems = items.filter((_, i) => i !== idx);
     setItems(newItems);
     updateParent(newItems);
+  };
+
+  const handleOpenAdjust = async (item: POItem) => {
+    if (!item.po_item_id) {
+      alert('먼저 PO를 저장해주세요.');
+      return;
+    }
+    setAdjustItem(item);
+    setAdjustDelta('');
+    setAdjustReason('');
+    setAdjustHistory([]);
+    try {
+      const hist = await procureApi.getPOItemAdjustments(item.po_item_id);
+      setAdjustHistory(hist);
+    } catch (e) {
+      // ignore
+    }
+  };
+
+  const handleAdjustConfirm = async () => {
+    if (!adjustItem) return;
+    const delta = parseNumberInput(adjustDelta);
+    if (delta === 0) {
+      alert('조정 수량(증분)을 입력해주세요. (증가 +, 감소 -)');
+      return;
+    }
+    setAdjustSaving(true);
+    try {
+      await procureApi.adjustPOItemQty({
+        adjustment_id: 0,
+        po_item_id: adjustItem.po_item_id,
+        kind: 'QTY',
+        qty_delta: delta,
+        old_value: 0,
+        new_value: 0,
+        reason: adjustReason,
+      });
+      setAdjustItem(null);
+      await loadItems();
+      setAdjustRefresh(k => k + 1);
+      if (po.po_id) procureApi.getPOEditLock(po.po_id).then(setLockInfo).catch(() => {});
+    } catch (e: any) {
+      alert(`조정 실패: ${e.message || e}`);
+    } finally {
+      setAdjustSaving(false);
+    }
   };
 
   const getItemName = (itemId: number) => {
@@ -158,105 +242,228 @@ const POItemDetail: React.FC<POItemDetailProps> = ({ po, onChange }) => {
           </div>
         </div>
       )}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-        <h3 style={{ color: 'var(--accent-color)' }}>PO Items</h3>
-        <button className="secondary" style={{ padding: '0.3rem 0.8rem', fontSize: '0.8rem' }} onClick={handleAddItem}>+ Add Item</button>
+      <div style={{ marginBottom: '0.5rem' }}>
+        <h3 style={{ color: 'var(--accent-color)', margin: 0 }}>
+          Current PO Items
+          <span style={{ fontSize: '0.75rem', fontWeight: 400, color: 'var(--text-secondary)', marginLeft: '0.5rem' }}>
+            (현행 최종 PO — Added PO Items 합산 · 읽기전용)
+          </span>
+        </h3>
       </div>
       {loading ? (
         <p>Loading items...</p>
       ) : (
-        <div className="table-container">
-          <table>
+        <div className="table-container" style={{ marginTop: '0.5rem' }}>
+          <table className="sub-table">
             <thead>
               <tr>
                 <th>Item</th>
-                <th>Qty</th>
-                <th>Price</th>
-                <th>Amount</th>
+                <th style={{ textAlign: 'right' }}>Qty</th>
+                <th style={{ textAlign: 'right' }}>Unit Price</th>
+                <th style={{ textAlign: 'right' }}>Amount</th>
                 <th>Status</th>
                 <th>Remark</th>
-                <th></th>
               </tr>
             </thead>
             <tbody>
               {items.map((item, idx) => (
                 <tr key={idx}>
                   <td style={{ minWidth: '180px' }}>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                      ID: {item.item_id}
-                    </div>
-                    <div style={{ fontWeight: 500 }}>
-                      {getItemName(item.item_id)}
-                    </div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>ID: {item.item_id}</div>
+                    <div style={{ fontWeight: 500 }}>{getItemName(item.item_id)}</div>
                   </td>
-                  <td>
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      value={item.po_qty || ''}
-                      style={{ width: '80px', padding: '0.3rem' }}
-                      onChange={(e) => handleItemChange(idx, 'po_qty', parseNumberInput(e.target.value))}
-                    />
-                  </td>
-                  <td>
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      value={item.unit_price || ''}
-                      style={{ width: '100px', padding: '0.3rem' }}
-                      onChange={(e) => handleItemChange(idx, 'unit_price', parseNumberInput(e.target.value))}
-                    />
-                  </td>
-                  <td style={{ textAlign: 'right', paddingRight: '1rem', fontWeight: 600 }}>
-                    {(item.po_qty * item.unit_price).toLocaleString()}
-                  </td>
-                  <td>
-                    <select 
-                      value={item.status || 'Not Shipped'} 
-                      style={{ padding: '0.3rem' }}
-                      onChange={(e) => handleItemChange(idx, 'status', e.target.value)}
-                    >
-                      <option value="Not Shipped">Not Shipped</option>
-                      <option value="Shipped">Shipped</option>
-                      <option value="Partially Shipped">Partially Shipped</option>
-                      <option value="Cancelled">Cancelled</option>
-                    </select>
-                  </td>
-                  <td>
-                    <input 
-                      type="text" 
-                      value={item.remark || ''} 
-                      placeholder="Remark..."
-                      style={{ width: '120px', padding: '0.3rem' }}
-                      onChange={(e) => handleItemChange(idx, 'remark', e.target.value)}
-                    />
-                  </td>
-                  <td>
-                    <button className="btn-danger secondary" style={{ padding: '0.2rem 0.5rem' }} onClick={() => handleRemoveItem(idx)}>✕</button>
-                  </td>
+                  <td style={{ textAlign: 'right' }}>{item.po_qty?.toLocaleString()}</td>
+                  <td style={{ textAlign: 'right' }}>{item.unit_price?.toLocaleString()}</td>
+                  <td style={{ textAlign: 'right', fontWeight: 600 }}>{(item.po_qty * item.unit_price).toLocaleString()}</td>
+                  <td>{item.status}</td>
+                  <td>{item.remark || '-'}</td>
                 </tr>
               ))}
               {items.length > 0 && (
                 <tr style={{ background: 'rgba(14, 165, 233, 0.05)' }}>
                   <td colSpan={3} style={{ textAlign: 'right', fontWeight: 700 }}>Total:</td>
-                  <td style={{ textAlign: 'right', paddingRight: '1rem', fontWeight: 700, color: 'var(--accent-color)' }}>
-                    {items
-                      .filter(i => i.status !== 'Cancelled')
-                      .reduce((acc, i) => acc + (i.po_qty * i.unit_price), 0)
-                      .toLocaleString()}
+                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--accent-color)' }}>
+                    {items.reduce((acc, i) => acc + (i.po_qty * i.unit_price), 0).toLocaleString()}
                   </td>
-                  <td colSpan={3}></td>
+                  <td colSpan={2}></td>
                 </tr>
               )}
               {items.length === 0 && (
                 <tr>
-                  <td colSpan={7} style={{ textAlign: 'center', padding: '1rem' }}>No items added. Click "+ Add Item" to select from Item Master.</td>
+                  <td colSpan={6} style={{ textAlign: 'center', padding: '1rem' }}>No items. Use "+ Add Item" in Added PO Items.</td>
                 </tr>
               )}
             </tbody>
           </table>
         </div>
       )}
+
+      {/* Added PO Items — 입력/변경 원장 */}
+      <div style={{ marginTop: '1.5rem', borderTop: '1px solid var(--border-color)', paddingTop: '1rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+          <h3 style={{ color: 'var(--accent-color)', margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+            Added PO Items
+            <span style={{ fontSize: '0.75rem', fontWeight: 400, color: 'var(--text-secondary)' }}>
+              (추가/증분 입력 — 사유 기록)
+            </span>
+            {isLocked && (
+              <span style={{ fontSize: '0.75rem', fontWeight: 400, color: '#b45309' }}>
+                🔒 참조(AP / Container Item)가 있어 기존 품목의 수량/단가는 조정(증분)으로만 변경됩니다 (신규 품목 추가는 가능)
+              </span>
+            )}
+          </h3>
+          <button className="secondary" style={{ padding: '0.3rem 0.8rem', fontSize: '0.8rem' }} onClick={handleAddItem}>+ Add Item</button>
+        </div>
+        {items.length === 0 ? (
+          <div style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', padding: '1rem', textAlign: 'center', background: 'var(--bg-secondary)', borderRadius: '6px' }}>
+            추가된 항목이 없습니다. "+ Add Item"을 눌러 추가하세요.
+          </div>
+        ) : (
+          <div className="table-container">
+            <table className="sub-table">
+              <thead>
+                <tr>
+                  <th>Item</th>
+                  <th>구분</th>
+                  <th>수량 / 단가</th>
+                  <th>사유</th>
+                  <th>작성자</th>
+                  <th>일시</th>
+                  <th style={{ width: '120px' }}></th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.flatMap((item, idx) => {
+                  const adj = adjustmentsMap.get(item.po_item_id) || [];
+                  const expanded = expandedItems.has(item.po_item_id);
+                  const toggle = () => setExpandedItems(prev => {
+                    const s = new Set(prev);
+                    if (s.has(item.po_item_id)) s.delete(item.po_item_id); else s.add(item.po_item_id);
+                    return s;
+                  });
+                  const baseQty = item.base_qty ?? item.po_qty ?? 0;
+                  const editable = !isLocked || item.po_item_id === 0;
+                  const rows: JSX.Element[] = [];
+                  rows.push(
+                    <tr key={`${item.po_item_id}-base`}>
+                      <td>
+                        <button
+                          type="button"
+                          className="secondary"
+                          style={{ padding: '0 0.35rem', fontSize: '0.7rem', minWidth: 'auto', marginRight: '0.35rem' }}
+                          onClick={toggle}
+                          disabled={adj.length === 0}
+                        >
+                          {expanded ? '▾' : '▸'}
+                        </button>
+                        {getItemName(item.item_id)}
+                      </td>
+                      <td>기준</td>
+                      <td>
+                        {!editable ? (
+                          <span style={{ fontWeight: 600 }}>
+                            {baseQty.toLocaleString()}
+                            <span style={{ color: 'var(--text-secondary)', fontWeight: 400 }}> ({item.unit_price?.toLocaleString()})</span>
+                          </span>
+                        ) : (
+                          <div style={{ display: 'flex', gap: '0.3rem', alignItems: 'center' }}>
+                            <input
+                              type="text"
+                              inputMode="decimal"
+                              value={item.po_qty || ''}
+                              style={{ width: '70px', padding: '0.2rem' }}
+                              onChange={(e) => handleItemChange(idx, 'po_qty', parseNumberInput(e.target.value))}
+                            />
+                            {item.po_item_id === 0 ? (
+                              <input
+                                type="text"
+                                inputMode="decimal"
+                                value={item.unit_price || ''}
+                                placeholder="단가"
+                                style={{ width: '80px', padding: '0.2rem' }}
+                                onChange={(e) => handleItemChange(idx, 'unit_price', parseNumberInput(e.target.value))}
+                              />
+                            ) : (
+                              <span style={{ color: 'var(--text-secondary)', minWidth: '60px' }}>{item.unit_price?.toLocaleString()}</span>
+                            )}
+                          </div>
+                        )}
+                      </td>
+                      <td>
+                        {editable ? (
+                          <input
+                            type="text"
+                            value={item.remark || ''}
+                            placeholder="Remark..."
+                            style={{ width: '120px', padding: '0.2rem' }}
+                            onChange={(e) => handleItemChange(idx, 'remark', e.target.value)}
+                          />
+                        ) : (item.remark || '-')}
+                      </td>
+                      <td>{item.created_by || '-'}</td>
+                      <td>{item.created_at ? String(item.created_at).split('T')[0] : '-'}</td>
+                      <td>
+                        {item.po_item_id > 0 && (
+                          <button
+                            type="button"
+                            className="secondary"
+                            style={{ padding: '0.15rem 0.45rem', fontSize: '0.7rem', minWidth: 'auto', marginRight: '0.3rem' }}
+                            onClick={() => handleOpenAdjust(item)}
+                          >
+                            조정
+                          </button>
+                        )}
+                        {editable && (
+                          <button
+                            className="btn-danger secondary"
+                            style={{ padding: '0.15rem 0.45rem', fontSize: '0.7rem', minWidth: 'auto' }}
+                            onClick={() => handleRemoveItem(idx)}
+                          >
+                            ✕
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                  if (expanded) {
+                    adj.forEach(a => {
+                      rows.push(
+                        <tr key={`adj-${a.adjustment_id}`}>
+                          <td></td>
+                          <td>{a.kind === 'PRICE' ? '단가' : '수량'}</td>
+                          <td style={{ fontWeight: 600 }}>
+                            {a.kind === 'PRICE'
+                              ? `${a.old_value?.toLocaleString()} → ${a.new_value?.toLocaleString()}`
+                              : <span style={{ color: a.qty_delta < 0 ? '#dc2626' : '#059669' }}>{a.qty_delta > 0 ? `+${a.qty_delta.toLocaleString()}` : a.qty_delta.toLocaleString()}</span>}
+                          </td>
+                          <td>{a.reason || '-'}</td>
+                          <td>{a.created_by || '-'}</td>
+                          <td>{a.created_at ? String(a.created_at).split('T')[0] : '-'}</td>
+                          <td></td>
+                        </tr>
+                      );
+                    });
+                  }
+                  if (adj.length > 0) {
+                    rows.push(
+                      <tr key={`${item.po_item_id}-net`} style={{ background: 'var(--bg-secondary)' }}>
+                        <td></td>
+                        <td>현행</td>
+                        <td style={{ fontWeight: 700 }}>
+                          {item.po_qty?.toLocaleString()}
+                          <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}> ({item.unit_price?.toLocaleString()})</span>
+                        </td>
+                        <td colSpan={4}></td>
+                      </tr>
+                    );
+                  }
+                  return rows;
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
 
       {itemSearchOpen && (
         <SearchModal
@@ -265,6 +472,69 @@ const POItemDetail: React.FC<POItemDetailProps> = ({ po, onChange }) => {
           onClose={() => setItemSearchOpen(false)}
           onSelect={handleSelectItem}
         />
+      )}
+
+      {adjustItem && (
+        <div className="modal-overlay" onClick={() => setAdjustItem(null)}>
+          <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '560px' }}>
+            <div className="modal-header">
+              <h3>수량 조정 — {getItemName(adjustItem.item_id)}</h3>
+              <button className="secondary" onClick={() => setAdjustItem(null)}>✕</button>
+            </div>
+            <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>
+              현재 수량: <strong>{adjustItem.po_qty?.toLocaleString()}</strong>
+              {'  |  '}단가: <strong>{adjustItem.unit_price?.toLocaleString()}</strong> (불변)
+            </div>
+            <div className="form-grid">
+              <div className="form-group">
+                <label>조정 수량 (증가 +, 감소 -)</label>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={adjustDelta}
+                  onChange={e => setAdjustDelta(e.target.value)}
+                  placeholder="예: 100 또는 -50"
+                />
+              </div>
+              <div className="form-group">
+                <label>사유</label>
+                <input
+                  type="text"
+                  value={adjustReason}
+                  onChange={e => setAdjustReason(e.target.value)}
+                  placeholder="예: 발주 수량 증량 / 취소"
+                />
+              </div>
+            </div>
+            {adjustDelta && (
+              <div style={{ fontSize: '0.85rem', marginBottom: '0.75rem' }}>
+                조정 후 수량: <strong>{((adjustItem.po_qty || 0) + parseNumberInput(adjustDelta)).toLocaleString()}</strong>
+              </div>
+            )}
+            {adjustHistory.length > 0 && (
+              <div style={{ maxHeight: '150px', overflow: 'auto', borderTop: '1px solid var(--border-color)', paddingTop: '0.5rem' }}>
+                <div style={{ fontSize: '0.8rem', fontWeight: 600, marginBottom: '0.25rem' }}>조정 이력</div>
+                <table className="sub-table" style={{ fontSize: '0.75rem', margin: 0 }}>
+                  <tbody>
+                    {adjustHistory.map(h => (
+                      <tr key={h.adjustment_id}>
+                        <td style={{ color: h.qty_delta >= 0 ? '#059669' : '#dc2626' }}>{h.qty_delta > 0 ? `+${h.qty_delta}` : h.qty_delta}</td>
+                        <td>{h.reason || '-'}</td>
+                        <td>{h.created_at?.split('T')[0]}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <div className="modal-actions">
+              <button className="secondary" onClick={() => setAdjustItem(null)}>Cancel</button>
+              <button className="btn-success" onClick={handleAdjustConfirm} disabled={adjustSaving}>
+                {adjustSaving ? '저장 중...' : 'Confirm'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Associated Account Payables Section */}

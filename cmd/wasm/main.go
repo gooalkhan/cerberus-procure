@@ -346,6 +346,66 @@ func main() {
 			return nil
 		}))
 	}))
+	procureObj.Set("getPOEditLock", js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		poId := args[0].Int()
+		return js.Global().Get("Promise").New(js.FuncOf(func(this js.Value, pArgs []js.Value) interface{} {
+			resolve := pArgs[0]
+			go func() {
+				hasAP, hasCI, _ := procureUC.GetPOReferenceStatus(poId)
+				b, _ := json.Marshal(map[string]interface{}{"locked": hasAP || hasCI, "has_ap": hasAP, "has_container_item": hasCI})
+				resolve.Invoke(string(b))
+			}()
+			return nil
+		}))
+	}))
+	procureObj.Set("getPOItemAdjustments", js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		poItemId := args[0].Int()
+		return js.Global().Get("Promise").New(js.FuncOf(func(this js.Value, pArgs []js.Value) interface{} {
+			resolve := pArgs[0]
+			go func() {
+				list, _ := procureUC.GetPOItemAdjustmentsByPOItemID(poItemId)
+				b, _ := json.Marshal(list)
+				resolve.Invoke(string(b))
+			}()
+			return nil
+		}))
+	}))
+	procureObj.Set("getPOItemAdjustmentsByPO", js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		poId := args[0].Int()
+		return js.Global().Get("Promise").New(js.FuncOf(func(this js.Value, pArgs []js.Value) interface{} {
+			resolve := pArgs[0]
+			go func() {
+				list, _ := procureUC.GetPOItemAdjustmentsByPOID(poId)
+				b, _ := json.Marshal(list)
+				resolve.Invoke(string(b))
+			}()
+			return nil
+		}))
+	}))
+	procureObj.Set("adjustPOItemQty", js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		jsonStr := args[0].String()
+		return js.Global().Get("Promise").New(js.FuncOf(func(this js.Value, pArgs []js.Value) interface{} {
+			resolve := pArgs[0]
+			reject := pArgs[1]
+			go func() {
+				var a models.POItemAdjustment
+				json.Unmarshal([]byte(jsonStr), &a)
+				var err error
+				if a.Kind == "PRICE" {
+					err = procureUC.AdjustPOItemPrice(&a)
+				} else {
+					err = procureUC.AdjustPOItemQty(&a)
+				}
+				if err != nil {
+					reject.Invoke(err.Error())
+					return
+				}
+				b, _ := json.Marshal(a)
+				resolve.Invoke(string(b))
+			}()
+			return nil
+		}))
+	}))
 
 	// Containers
 	procureObj.Set("getContainers", js.FuncOf(func(this js.Value, args []js.Value) interface{} {
@@ -701,6 +761,201 @@ func main() {
 		}))
 	}))
 
+	procureObj.Set("getConstraintProfiles", js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		return js.Global().Get("Promise").New(js.FuncOf(func(this js.Value, pArgs []js.Value) interface{} {
+			resolve := pArgs[0]
+			reject := pArgs[1]
+			go func() {
+				list, err := procureUC.GetConstraintProfiles()
+				if err != nil {
+					reject.Invoke(err.Error())
+					return
+				}
+				b, _ := json.Marshal(list)
+				resolve.Invoke(string(b))
+			}()
+			return nil
+		}))
+	}))
+
+	procureObj.Set("getConstraints", js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		return js.Global().Get("Promise").New(js.FuncOf(func(this js.Value, pArgs []js.Value) interface{} {
+			resolve := pArgs[0]
+			reject := pArgs[1]
+			go func() {
+				list, err := procureUC.GetConstraints()
+				if err != nil {
+					reject.Invoke(err.Error())
+					return
+				}
+				b, _ := json.Marshal(list)
+				resolve.Invoke(string(b))
+			}()
+			return nil
+		}))
+	}))
+
+	procureObj.Set("saveConstraint", js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		jsonStr := args[0].String()
+		return js.Global().Get("Promise").New(js.FuncOf(func(this js.Value, pArgs []js.Value) interface{} {
+			resolve := pArgs[0]
+			reject := pArgs[1]
+			go func() {
+				var c models.ConstraintMaster
+				if err := json.Unmarshal([]byte(jsonStr), &c); err != nil {
+					reject.Invoke(err.Error())
+					return
+				}
+				if err := procureUC.SaveConstraintMaster(&c); err != nil {
+					reject.Invoke(err.Error())
+					return
+				}
+				b, _ := json.Marshal(c)
+				resolve.Invoke(string(b))
+			}()
+			return nil
+		}))
+	}))
+
+	procureObj.Set("saveConstraintProfile", js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		jsonStr := args[0].String()
+		return js.Global().Get("Promise").New(js.FuncOf(func(this js.Value, pArgs []js.Value) interface{} {
+			resolve := pArgs[0]
+			reject := pArgs[1]
+			go func() {
+				var p models.ConstraintProfile
+				if err := json.Unmarshal([]byte(jsonStr), &p); err != nil {
+					reject.Invoke(err.Error())
+					return
+				}
+				if err := procureUC.SaveConstraintProfile(&p); err != nil {
+					reject.Invoke(err.Error())
+					return
+				}
+				b, _ := json.Marshal(p)
+				resolve.Invoke(string(b))
+			}()
+			return nil
+		}))
+	}))
+
+	procureObj.Set("getConstraintAvailability", js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		ciID := args[0].Int()
+		return js.Global().Get("Promise").New(js.FuncOf(func(this js.Value, pArgs []js.Value) interface{} {
+			resolve := pArgs[0]
+			reject := pArgs[1]
+			go func() {
+				res, err := procureUC.ComputeConstraintAvailability(ciID)
+				if err != nil {
+					reject.Invoke(err.Error())
+					return
+				}
+				b, _ := json.Marshal(res)
+				resolve.Invoke(string(b))
+			}()
+			return nil
+		}))
+	}))
+
+	procureObj.Set("getConstraintInstances", js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		lotID := args[0].Int()
+		return js.Global().Get("Promise").New(js.FuncOf(func(this js.Value, pArgs []js.Value) interface{} {
+			resolve := pArgs[0]
+			reject := pArgs[1]
+			go func() {
+				list, err := procureUC.GetConstraintInstances(lotID)
+				if err != nil {
+					reject.Invoke(err.Error())
+					return
+				}
+				b, _ := json.Marshal(list)
+				resolve.Invoke(string(b))
+			}()
+			return nil
+		}))
+	}))
+
+	procureObj.Set("saveConstraintInstance", js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		jsonStr := args[0].String()
+		return js.Global().Get("Promise").New(js.FuncOf(func(this js.Value, pArgs []js.Value) interface{} {
+			resolve := pArgs[0]
+			reject := pArgs[1]
+			go func() {
+				var inst models.ConstraintInstance
+				if err := json.Unmarshal([]byte(jsonStr), &inst); err != nil {
+					reject.Invoke(err.Error())
+					return
+				}
+				if err := procureUC.SaveConstraintInstance(&inst); err != nil {
+					reject.Invoke(err.Error())
+					return
+				}
+				b, _ := json.Marshal(inst)
+				resolve.Invoke(string(b))
+			}()
+			return nil
+		}))
+	}))
+
+	procureObj.Set("deleteConstraintInstance", js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		id := args[0].Int()
+		return js.Global().Get("Promise").New(js.FuncOf(func(this js.Value, pArgs []js.Value) interface{} {
+			resolve := pArgs[0]
+			reject := pArgs[1]
+			go func() {
+				if err := procureUC.DeleteConstraintInstance(id); err != nil {
+					reject.Invoke(err.Error())
+					return
+				}
+				resolve.Invoke()
+			}()
+			return nil
+		}))
+	}))
+
+	procureObj.Set("getConstraintSchedule", js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		lotID := args[0].Int()
+		return js.Global().Get("Promise").New(js.FuncOf(func(this js.Value, pArgs []js.Value) interface{} {
+			resolve := pArgs[0]
+			reject := pArgs[1]
+			go func() {
+				sched, err := procureUC.GetLotConstraintSchedule(lotID)
+				if err != nil {
+					reject.Invoke(err.Error())
+					return
+				}
+				b, _ := json.Marshal(sched)
+				resolve.Invoke(string(b))
+			}()
+			return nil
+		}))
+	}))
+
+	procureObj.Set("bulkAppendConstraint", js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		jsonStr := args[0].String()
+		return js.Global().Get("Promise").New(js.FuncOf(func(this js.Value, pArgs []js.Value) interface{} {
+			resolve := pArgs[0]
+			reject := pArgs[1]
+			go func() {
+				var body struct {
+					ContainerItemID int    `json:"container_item_id"`
+					ConstraintType  string `json:"constraint_type"`
+					LeadTimeDays    int    `json:"lead_time_days"`
+				}
+				if err := json.Unmarshal([]byte(jsonStr), &body); err != nil {
+					reject.Invoke(err.Error())
+					return
+				}
+				if err := procureUC.BulkAppendConstraintToShipment(body.ContainerItemID, body.ConstraintType, body.LeadTimeDays); err != nil {
+					reject.Invoke(err.Error())
+					return
+				}
+				resolve.Invoke()
+			}()
+			return nil
+		}))
+	}))
+
 	procureObj.Set("saveAPTargetGroup", js.FuncOf(func(this js.Value, args []js.Value) interface{} {
 		jsonStr := args[0].String()
 		return js.Global().Get("Promise").New(js.FuncOf(func(this js.Value, pArgs []js.Value) interface{} {
@@ -772,6 +1027,20 @@ func main() {
 					return
 				}
 				b, _ := json.Marshal(list)
+				resolve.Invoke(string(b))
+			}()
+			return nil
+		}))
+	}))
+
+	procureObj.Set("getReferenceNo", js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		refType := args[0].String()
+		uuid := args[1].String()
+		return js.Global().Get("Promise").New(js.FuncOf(func(this js.Value, pArgs []js.Value) interface{} {
+			resolve := pArgs[0]
+			go func() {
+				no, _ := procureUC.GetReferenceNoByUUID(refType, uuid)
+				b, _ := json.Marshal(map[string]string{"reference_no": no})
 				resolve.Invoke(string(b))
 			}()
 			return nil

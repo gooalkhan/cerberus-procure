@@ -24,6 +24,12 @@ type MemoryProcurementRepository struct {
 	containerItems map[int][]models.ContainerItem
 	caItems map[int][]models.CostAllocationItem
 	apTargetGroups map[int]models.AP_TargetGroup
+	apTargetGroupItems map[int][]models.AP_TargetGroupItem
+	constraintProfiles map[int]models.ConstraintProfile
+	constraintProfileSteps map[int][]models.ConstraintProfileStep
+	constraintInstances map[int][]models.ConstraintInstance
+	constraints map[int]models.ConstraintMaster
+	poItemAdjustments map[int][]models.POItemAdjustment
 	nextID int
 }
 
@@ -43,6 +49,12 @@ func NewMemoryProcurementRepository() *MemoryProcurementRepository {
 		containerItems: make(map[int][]models.ContainerItem),
 		caItems:    make(map[int][]models.CostAllocationItem),
 		apTargetGroups: make(map[int]models.AP_TargetGroup),
+		apTargetGroupItems: make(map[int][]models.AP_TargetGroupItem),
+		constraintProfiles: make(map[int]models.ConstraintProfile),
+		constraintProfileSteps: make(map[int][]models.ConstraintProfileStep),
+		constraintInstances: make(map[int][]models.ConstraintInstance),
+		constraints: make(map[int]models.ConstraintMaster),
+		poItemAdjustments: make(map[int][]models.POItemAdjustment),
 		nextID:     10000,
 	}
 	r.seed()
@@ -67,10 +79,16 @@ func (r *MemoryProcurementRepository) seed() {
 	r.cas = make(map[int]models.CostAllocation)
 	r.containerItems = make(map[int][]models.ContainerItem)
 	r.caItems = make(map[int][]models.CostAllocationItem)
+	r.apTargetGroupItems = make(map[int][]models.AP_TargetGroupItem)
+	r.constraintProfiles = make(map[int]models.ConstraintProfile)
+	r.constraintProfileSteps = make(map[int][]models.ConstraintProfileStep)
+	r.constraintInstances = make(map[int][]models.ConstraintInstance)
+	r.constraints = make(map[int]models.ConstraintMaster)
+	r.poItemAdjustments = make(map[int][]models.POItemAdjustment)
 
 	// Mock Items
-	item1 := models.ItemMaster{ID: 1, SKUCode: "ITEM-001", Name: "Premium Coffee Beans", VendorID: 1, CBM: 0.05, NetWeight: 10, GrossWeight: 10.5, CreatedAt: time.Now()}
-	item2 := models.ItemMaster{ID: 2, SKUCode: "ITEM-002", Name: "Organic Tea Leaves", VendorID: 1, CBM: 0.03, NetWeight: 5, GrossWeight: 5.2, CreatedAt: time.Now()}
+	item1 := models.ItemMaster{ID: 1, SKUCode: "ITEM-001", Name: "Premium Coffee Beans", VendorID: 1, CBM: 0.05, NetWeight: 10, GrossWeight: 10.5, BoxQty: 10, BoxesPerPallet: 96, BoxWidth: 60, BoxLength: 40, BoxHeight: 30, CreatedAt: time.Now()}
+	item2 := models.ItemMaster{ID: 2, SKUCode: "ITEM-002", Name: "Organic Tea Leaves", VendorID: 1, CBM: 0.03, NetWeight: 5, GrossWeight: 5.2, BoxQty: 20, BoxesPerPallet: 96, BoxWidth: 60, BoxLength: 40, BoxHeight: 30, CreatedAt: time.Now()}
 	r.items[item1.ID] = item1
 	r.items[item2.ID] = item2
 
@@ -138,16 +156,12 @@ func (r *MemoryProcurementRepository) seed() {
 	r.aps[ap1.ID] = ap1
 
 	// Mock Goods Receipts
-	gr1 := models.GoodsReceipt{ID: 1, ReceiveDate: time.Now().AddDate(0, 0, -1), Remark: "First Shipment Arrived", UUID: "gr-uuid-1", CreatedAt: time.Now()}
+	gr1 := models.GoodsReceipt{ID: 1, GRNo: "GR-0001", ReceiveDate: time.Now().AddDate(0, 0, -1), Remark: "First Shipment Arrived", UUID: "gr-uuid-1", CreatedAt: time.Now()}
 	r.grs[gr1.ID] = gr1
 
 	// Mock Inventory Lots
 	lot1 := models.InventoryLot{ID: 1, GRID: 1, ContainerItemID: 1, LotNo: "LOT-COFFEE-001", Qty: 100, LandedCostPerUnit: 16.2, QuarantineStatus: "Passed", UUID: "lot-uuid-1", CreatedAt: time.Now()}
 	r.lots[lot1.ID] = lot1
-
-	// Update aggregations
-	r.updateContainerAggregation(c1.ID)
-	r.updateContainerAggregation(c2.ID)
 }
 
 func (r *MemoryProcurementRepository) SeedData() error {
@@ -265,6 +279,9 @@ func (r *MemoryProcurementRepository) GetPOItemsByPOID(poID int) ([]models.POIte
 func (r *MemoryProcurementRepository) SavePOItem(i *models.POItem) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if i.BaseQty <= 0 {
+		i.BaseQty = i.POQty
+	}
 	if i.ID == 0 {
 		i.ID = 1000 + len(r.poItems[i.POID]) + 1
 		i.CreatedAt = time.Now()
@@ -278,29 +295,7 @@ func (r *MemoryProcurementRepository) SavePOItem(i *models.POItem) error {
 			}
 		}
 	}
-
-	r.syncPOStatus(i.POID)
 	return nil
-}
-
-func (r *MemoryProcurementRepository) syncPOStatus(poID int) {
-	items := r.poItems[poID]
-	allTerminal := true
-	for _, item := range items {
-		if item.Status != "Shipped" && item.Status != "Cancelled" {
-			allTerminal = false
-			break
-		}
-	}
-	if allTerminal && len(items) > 0 {
-		po := r.pos[poID]
-		po.Status = "Closed"
-		r.pos[poID] = po
-	} else if !allTerminal {
-		po := r.pos[poID]
-		po.Status = "Open"
-		r.pos[poID] = po
-	}
 }
 
 func (r *MemoryProcurementRepository) DeletePOItem(id int) error {
@@ -315,14 +310,12 @@ func (r *MemoryProcurementRepository) DeletePOItem(id int) error {
 		}
 	}
 
-	var targetPOID int
 	for poID, items := range r.poItems {
 		newItems := make([]models.POItem, 0, len(items))
 		found := false
 		for _, item := range items {
 			if item.ID == id {
 				found = true
-				targetPOID = poID
 			} else {
 				newItems = append(newItems, item)
 			}
@@ -333,11 +326,134 @@ func (r *MemoryProcurementRepository) DeletePOItem(id int) error {
 		}
 	}
 
-	if targetPOID > 0 {
-		r.syncPOStatus(targetPOID)
-	}
-
 	return nil
+}
+
+func (r *MemoryProcurementRepository) GetPOItemByID(id int) (*models.POItem, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, items := range r.poItems {
+		for _, it := range items {
+			if it.ID == id {
+				cp := it
+				return &cp, nil
+			}
+		}
+	}
+	return nil, nil
+}
+
+func (r *MemoryProcurementRepository) GetPOItemByBucket(poID int, itemID int, unitPrice float64) (*models.POItem, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, it := range r.poItems[poID] {
+		if it.ItemID == itemID && it.UnitPrice == unitPrice {
+			cp := it
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
+func (r *MemoryProcurementRepository) GetPOLoadQty(poItemID int) (float64, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	var qty float64
+	for _, items := range r.containerItems {
+		for _, ci := range items {
+			if ci.POItemID == poItemID {
+				qty += ci.LoadQty
+			}
+		}
+	}
+	return qty, nil
+}
+
+func (r *MemoryProcurementRepository) SavePOItemAdjustment(a *models.POItemAdjustment) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if a.ID == 0 {
+		a.ID = r.nextID
+		r.nextID++
+		a.CreatedAt = time.Now()
+	}
+	r.poItemAdjustments[a.POItemID] = append(r.poItemAdjustments[a.POItemID], *a)
+	return nil
+}
+
+func (r *MemoryProcurementRepository) GetPOItemAdjustmentsByPOItemID(poItemID int) ([]models.POItemAdjustment, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.poItemAdjustments[poItemID], nil
+}
+
+func (r *MemoryProcurementRepository) GetPOItemAdjustmentsByPOID(poID int) ([]models.POItemAdjustment, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	ids := map[int]bool{}
+	for _, it := range r.poItems[poID] {
+		ids[it.ID] = true
+	}
+	list := []models.POItemAdjustment{}
+	for itemID, adjs := range r.poItemAdjustments {
+		if ids[itemID] {
+			list = append(list, adjs...)
+		}
+	}
+	return list, nil
+}
+
+func (r *MemoryProcurementRepository) GetPOReferenceStatus(poID int) (bool, bool, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	// AP 참조 여부: 직접 참조(Reference_Type='PO') 또는 AP Target Group(멤버에 이 PO 포함) 간접 참조
+	hasAP := false
+	if po, ok := r.pos[poID]; ok {
+		groupUUIDs := map[string]bool{}
+		for _, ap := range r.aps {
+			if ap.ReferenceType == "PO" && ap.ReferenceUUID == po.UUID {
+				hasAP = true
+				break
+			}
+			if ap.ReferenceType == "AP_Target_Group" {
+				groupUUIDs[ap.ReferenceUUID] = true
+			}
+		}
+		if !hasAP && len(groupUUIDs) > 0 {
+			for _, g := range r.apTargetGroups {
+				if !groupUUIDs[g.UUID] {
+					continue
+				}
+				for _, gi := range r.apTargetGroupItems[g.ID] {
+					if gi.ReferenceUUID == po.UUID {
+						hasAP = true
+						break
+					}
+				}
+				if hasAP {
+					break
+				}
+			}
+		}
+	}
+	// Container Item 존재 여부
+	hasCI := false
+	poItemIDs := map[int]bool{}
+	for _, it := range r.poItems[poID] {
+		poItemIDs[it.ID] = true
+	}
+	for _, items := range r.containerItems {
+		for _, ci := range items {
+			if poItemIDs[ci.POItemID] {
+				hasCI = true
+				break
+			}
+		}
+		if hasCI {
+			break
+		}
+	}
+	return hasAP, hasCI, nil
 }
 
 // Commercial Invoice
@@ -426,6 +542,31 @@ func (r *MemoryProcurementRepository) GetAccountPayables() ([]models.AccountPaya
 	return list, nil
 }
 
+func (r *MemoryProcurementRepository) GetAccountPayableByID(id int) (*models.AccountPayable, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if i, ok := r.aps[id]; ok {
+		return &i, nil
+	}
+	return nil, nil
+}
+
+func (r *MemoryProcurementRepository) GetAPAllocatedAmount(apID int) (bool, float64, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	var hasAny bool
+	var total float64
+	for _, items := range r.caItems {
+		for _, it := range items {
+			if it.APID == apID {
+				hasAny = true
+				total += it.AllocatedAmount
+			}
+		}
+	}
+	return hasAny, total, nil
+}
+
 func (r *MemoryProcurementRepository) SaveAccountPayable(i *models.AccountPayable) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -447,6 +588,16 @@ func (r *MemoryProcurementRepository) GetContainers() ([]models.Container, error
 		list = append(list, i)
 	}
 	return list, nil
+}
+
+func (r *MemoryProcurementRepository) GetContainerByID(id int) (*models.Container, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if c, ok := r.containers[id]; ok {
+		cc := c
+		return &cc, nil
+	}
+	return nil, nil
 }
 
 func (r *MemoryProcurementRepository) SaveContainer(i *models.Container) error {
@@ -490,6 +641,16 @@ func (r *MemoryProcurementRepository) GetGoodsReceipts() ([]models.GoodsReceipt,
 	return list, nil
 }
 
+func (r *MemoryProcurementRepository) GetGoodsReceiptByID(id int) (*models.GoodsReceipt, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if g, ok := r.grs[id]; ok {
+		gg := g
+		return &gg, nil
+	}
+	return nil, nil
+}
+
 func (r *MemoryProcurementRepository) SaveGoodsReceipt(i *models.GoodsReceipt) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -508,6 +669,16 @@ func (r *MemoryProcurementRepository) GetInventoryLots() ([]models.InventoryLot,
 		list = append(list, i)
 	}
 	return list, nil
+}
+
+func (r *MemoryProcurementRepository) GetInventoryLotByID(id int) (*models.InventoryLot, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if l, ok := r.lots[id]; ok {
+		ll := l
+		return &ll, nil
+	}
+	return nil, nil
 }
 
 func (r *MemoryProcurementRepository) GetInventoryLotsByGRID(grID int) ([]models.InventoryLot, error) {
@@ -570,128 +741,37 @@ func (r *MemoryProcurementRepository) SaveContainerItem(i *models.ContainerItem)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	// Fetch Item details for calculation
-	var masterItem *models.ItemMaster
-	found := false
-	for _, items := range r.poItems {
-		for _, pi := range items {
-			if pi.ID == i.POItemID {
-				if m, ok := r.items[pi.ItemID]; ok {
-					masterItem = &m
-				}
-				found = true
-				break
-			}
-		}
-		if found {
-			break
-		}
-	}
-
-	if masterItem != nil {
-		i.GrossWeight = masterItem.GrossWeight * i.LoadQty
-		i.NetWeight = masterItem.NetWeight * i.LoadQty
-		i.CBM = masterItem.CBM * i.LoadQty
-	}
-
 	if i.ID == 0 {
 		i.ID = 2000 + (r.nextID + 1)
 		r.nextID++
 		r.containerItems[i.ContainerID] = append(r.containerItems[i.ContainerID], *i)
-		r.updateContainerAggregation(i.ContainerID)
-		r.syncPOItemStatus(i.POItemID)
-	} else {
-		// Find and remove from old container (if exists)
-		oldContainerID := -1
-		oldPOItemID := -1
-		for cid, items := range r.containerItems {
-			for idx, item := range items {
-				if item.ID == i.ID {
-					oldContainerID = cid
-					oldPOItemID = item.POItemID
-					// Remove from old
-					r.containerItems[cid] = append(items[:idx], items[idx+1:]...)
-					break
-				}
-			}
-			if oldContainerID != -1 {
+		return nil
+	}
+	// 다른 컨테이너로 이동한 경우 기존 위치에서 제거
+	for cid, items := range r.containerItems {
+		for idx, item := range items {
+			if item.ID == i.ID {
+				r.containerItems[cid] = append(items[:idx], items[idx+1:]...)
 				break
 			}
 		}
-		// Add to new container
-		r.containerItems[i.ContainerID] = append(r.containerItems[i.ContainerID], *i)
-		
-		// Update aggregations for both
-		r.updateContainerAggregation(i.ContainerID)
-		if oldContainerID != -1 && oldContainerID != i.ContainerID {
-			r.updateContainerAggregation(oldContainerID)
-		}
-
-		r.syncPOItemStatus(i.POItemID)
-		if oldPOItemID != -1 && oldPOItemID != i.POItemID {
-			r.syncPOItemStatus(oldPOItemID)
-		}
 	}
+	r.containerItems[i.ContainerID] = append(r.containerItems[i.ContainerID], *i)
 	return nil
 }
 
-func (r *MemoryProcurementRepository) syncPOItemStatus(poItemID int) {
-	if poItemID <= 0 {
-		return
-	}
-	var totalLoadQty float64
+func (r *MemoryProcurementRepository) GetContainerItemByID(id int) (*models.ContainerItem, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	for _, items := range r.containerItems {
-		for _, ci := range items {
-			if ci.POItemID == poItemID {
-				totalLoadQty += ci.LoadQty
+		for _, it := range items {
+			if it.ID == id {
+				cc := it
+				return &cc, nil
 			}
 		}
 	}
-
-	var targetPOID int
-	for poID, items := range r.poItems {
-		for idx, pi := range items {
-			if pi.ID == poItemID {
-				if pi.Status == "Cancelled" {
-					return
-				}
-				newStatus := "Not Shipped"
-				if totalLoadQty >= pi.POQty {
-					newStatus = "Shipped"
-				} else if totalLoadQty > 0 {
-					newStatus = "Partially Shipped"
-				}
-				if pi.Status != newStatus {
-					r.poItems[poID][idx].Status = newStatus
-					targetPOID = poID
-				}
-				break
-			}
-		}
-		if targetPOID > 0 {
-			break
-		}
-	}
-
-	if targetPOID > 0 {
-		r.syncPOStatus(targetPOID)
-	}
-}
-
-func (r *MemoryProcurementRepository) updateContainerAggregation(containerID int) {
-	items := r.containerItems[containerID]
-	var totalCBM, totalNet, totalGross float64
-	for _, item := range items {
-		totalCBM += item.CBM
-		totalNet += item.NetWeight
-		totalGross += item.GrossWeight
-	}
-	if c, ok := r.containers[containerID]; ok {
-		c.TotalCBM = totalCBM
-		c.TotalNetWgt = totalNet
-		c.TotalGrossWgt = totalGross
-		r.containers[containerID] = c
-	}
+	return nil, nil
 }
 
 // Cost Allocation Items
@@ -712,6 +792,20 @@ func (r *MemoryProcurementRepository) SaveCostAllocationItem(i *models.CostAlloc
 		i.ID = 3000 + len(r.caItems[i.CostAllocationID]) + 1
 	}
 	r.caItems[i.CostAllocationID] = append(r.caItems[i.CostAllocationID], *i)
+	return nil
+}
+
+func (r *MemoryProcurementRepository) DeleteCostAllocationItem(id int) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for caID, items := range r.caItems {
+		for idx, it := range items {
+			if it.ID == id {
+				r.caItems[caID] = append(items[:idx], items[idx+1:]...)
+				return nil
+			}
+		}
+	}
 	return nil
 }
 
@@ -745,10 +839,10 @@ func (r *MemoryProcurementRepository) GetAPIDsUsedForLots(lotIDs []int) (map[int
 	return make(map[int]bool), nil
 }
 
-func (r *MemoryProcurementRepository) GetCostAllocationSummaryByAP(apID int) (float64, []int, error) {
+func (r *MemoryProcurementRepository) GetCostAllocationAmountsByAP(apID int) (map[int]float64, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	return 0, []int{}, nil
+	return make(map[int]float64), nil
 }
 
 func (r *MemoryProcurementRepository) GetCostAllocationWarningByPO(poID int) (*models.POAllocationWarning, error) {
@@ -938,6 +1032,7 @@ func (r *MemoryProcurementRepository) GetAPTargetGroups() ([]models.AP_TargetGro
 	defer r.mu.RUnlock()
 	list := make([]models.AP_TargetGroup, 0, len(r.apTargetGroups))
 	for _, g := range r.apTargetGroups {
+		g.Items = r.apTargetGroupItems[g.ID]
 		list = append(list, g)
 	}
 	return list, nil
@@ -947,13 +1042,16 @@ func (r *MemoryProcurementRepository) GetAPTargetGroupByID(id int) (*models.AP_T
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	if g, ok := r.apTargetGroups[id]; ok {
+		g.Items = r.apTargetGroupItems[id]
 		return &g, nil
 	}
 	return nil, nil
 }
 
 func (r *MemoryProcurementRepository) GetAPTargetGroupItems(groupID int) ([]models.AP_TargetGroupItem, error) {
-	return nil, nil
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.apTargetGroupItems[groupID], nil
 }
 
 func (r *MemoryProcurementRepository) SaveAPTargetGroup(g *models.AP_TargetGroup) error {
@@ -968,11 +1066,301 @@ func (r *MemoryProcurementRepository) SaveAPTargetGroup(g *models.AP_TargetGroup
 }
 
 func (r *MemoryProcurementRepository) SaveAPTargetGroupItem(item *models.AP_TargetGroupItem) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if item.ID == 0 {
+		item.ID = r.nextID
+		r.nextID++
+	}
+	r.apTargetGroupItems[item.GroupID] = append(r.apTargetGroupItems[item.GroupID], *item)
 	return nil
 }
 
 func (r *MemoryProcurementRepository) DeleteAPTargetGroupItem(id int) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for gid, items := range r.apTargetGroupItems {
+		for idx, it := range items {
+			if it.ID == id {
+				r.apTargetGroupItems[gid] = append(items[:idx], items[idx+1:]...)
+				return nil
+			}
+		}
+	}
 	return nil
+}
+
+// Constraint Profile (행정 제약 프로파일)
+func (r *MemoryProcurementRepository) GetConstraintProfiles() ([]models.ConstraintProfile, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	list := make([]models.ConstraintProfile, 0, len(r.constraintProfiles))
+	for _, p := range r.constraintProfiles {
+		p.Steps = append([]models.ConstraintProfileStep{}, r.constraintProfileSteps[p.ID]...)
+		list = append(list, p)
+	}
+	sort.Slice(list, func(i, j int) bool { return list[i].ID < list[j].ID })
+	return list, nil
+}
+
+func (r *MemoryProcurementRepository) GetConstraintProfileByID(id int) (*models.ConstraintProfile, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	p, ok := r.constraintProfiles[id]
+	if !ok {
+		return nil, nil
+	}
+	p.Steps = append([]models.ConstraintProfileStep{}, r.constraintProfileSteps[id]...)
+	return &p, nil
+}
+
+func (r *MemoryProcurementRepository) GetConstraintProfileSteps(profileID int) ([]models.ConstraintProfileStep, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	list := r.constraintProfileSteps[profileID]
+	if list == nil {
+		return []models.ConstraintProfileStep{}, nil
+	}
+	return append([]models.ConstraintProfileStep{}, list...), nil
+}
+
+func (r *MemoryProcurementRepository) SaveConstraintProfile(p *models.ConstraintProfile) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if p.ID == 0 {
+		p.ID = len(r.constraintProfiles) + 1
+		if p.CreatedAt.IsZero() {
+			p.CreatedAt = time.Now()
+		}
+	}
+	p.UpdatedAt = time.Now()
+	p.Steps = nil
+	r.constraintProfiles[p.ID] = *p
+	return nil
+}
+
+func (r *MemoryProcurementRepository) SaveConstraintProfileStep(s *models.ConstraintProfileStep) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	steps := r.constraintProfileSteps[s.ProfileID]
+	if s.ID == 0 {
+		s.ID = 5000 + r.nextID
+		r.nextID++
+		steps = append(steps, *s)
+	} else {
+		for i := range steps {
+			if steps[i].ID == s.ID {
+				steps[i] = *s
+				break
+			}
+		}
+	}
+	r.constraintProfileSteps[s.ProfileID] = steps
+	return nil
+}
+
+func (r *MemoryProcurementRepository) DeleteConstraintProfileStep(id int) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for pid, steps := range r.constraintProfileSteps {
+		for idx, it := range steps {
+			if it.ID == id {
+				r.constraintProfileSteps[pid] = append(steps[:idx], steps[idx+1:]...)
+				return nil
+			}
+		}
+	}
+	return nil
+}
+
+// Constraint Instance (Lot별 행정 제약 인스턴스)
+func (r *MemoryProcurementRepository) GetConstraintInstances(lotID int) ([]models.ConstraintInstance, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	list := r.constraintInstances[lotID]
+	if list == nil {
+		return []models.ConstraintInstance{}, nil
+	}
+	out := append([]models.ConstraintInstance{}, list...)
+	sort.Slice(out, func(i, j int) bool { return out[i].Sequence < out[j].Sequence })
+	return out, nil
+}
+
+func (r *MemoryProcurementRepository) SaveConstraintInstance(inst *models.ConstraintInstance) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	list := r.constraintInstances[inst.LotID]
+	if inst.ID == 0 {
+		inst.ID = 6000 + r.nextID
+		r.nextID++
+		list = append(list, *inst)
+	} else {
+		for i := range list {
+			if list[i].ID == inst.ID {
+				list[i] = *inst
+				break
+			}
+		}
+	}
+	r.constraintInstances[inst.LotID] = list
+	return nil
+}
+
+func (r *MemoryProcurementRepository) DeleteConstraintInstance(id int) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for lotID, list := range r.constraintInstances {
+		for i, it := range list {
+			if it.ID == id {
+				r.constraintInstances[lotID] = append(list[:i], list[i+1:]...)
+				return nil
+			}
+		}
+	}
+	return nil
+}
+
+// Constraint Master (개별 제약 카탈로그)
+func (r *MemoryProcurementRepository) GetConstraints() ([]models.ConstraintMaster, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	list := make([]models.ConstraintMaster, 0, len(r.constraints))
+	for _, c := range r.constraints {
+		list = append(list, c)
+	}
+	sort.Slice(list, func(i, j int) bool { return list[i].Name < list[j].Name })
+	return list, nil
+}
+
+func (r *MemoryProcurementRepository) GetConstraintMasterByID(id int) (*models.ConstraintMaster, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if c, ok := r.constraints[id]; ok {
+		cc := c
+		return &cc, nil
+	}
+	return nil, nil
+}
+
+func (r *MemoryProcurementRepository) SaveConstraintMaster(c *models.ConstraintMaster) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if c.ID == 0 {
+		c.ID = 7000 + r.nextID
+		r.nextID++
+		if c.CreatedAt.IsZero() {
+			c.CreatedAt = time.Now()
+		}
+	}
+	c.UpdatedAt = time.Now()
+	r.constraints[c.ID] = *c
+	return nil
+}
+
+// GetReferenceIDByUUID 메모리 모드에서 참조 타입별 UUID를 ID로 해석
+func (r *MemoryProcurementRepository) GetReferenceIDByUUID(refType string, uuid string) (int, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	switch refType {
+	case "PO":
+		for _, p := range r.pos {
+			if p.UUID == uuid {
+				return p.ID, nil
+			}
+		}
+	case "CI":
+		for _, c := range r.cis {
+			if c.UUID == uuid {
+				return c.ID, nil
+			}
+		}
+	case "BL":
+		for _, b := range r.bls {
+			if b.UUID == uuid {
+				return b.ID, nil
+			}
+		}
+	case "Container":
+		for _, c := range r.containers {
+			if c.UUID == uuid {
+				return c.ID, nil
+			}
+		}
+	case "ContainerItem", "Container Item":
+		for _, items := range r.containerItems {
+			for _, it := range items {
+				if it.UUID == uuid {
+					return it.ID, nil
+				}
+			}
+		}
+	case "GR":
+		for _, g := range r.grs {
+			if g.UUID == uuid {
+				return g.ID, nil
+			}
+		}
+	case "Lot":
+		for _, l := range r.lots {
+			if l.UUID == uuid {
+				return l.ID, nil
+			}
+		}
+	}
+	return 0, nil
+}
+
+// GetReferenceNoByUUID 메모리 모드에서 참조 문서의 표시 번호 조회
+func (r *MemoryProcurementRepository) GetReferenceNoByUUID(refType string, uuid string) (string, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	switch refType {
+	case "PO":
+		for _, p := range r.pos {
+			if p.UUID == uuid {
+				return p.PONo, nil
+			}
+		}
+	case "CI":
+		for _, c := range r.cis {
+			if c.UUID == uuid {
+				return c.CINo, nil
+			}
+		}
+	case "BL":
+		for _, b := range r.bls {
+			if b.UUID == uuid {
+				return b.BLNo, nil
+			}
+		}
+	case "Container":
+		for _, c := range r.containers {
+			if c.UUID == uuid {
+				return c.ContainerNo, nil
+			}
+		}
+	case "ContainerItem", "Container Item":
+		return "", nil
+	case "GR":
+		for _, g := range r.grs {
+			if g.UUID == uuid {
+				return g.GRNo, nil
+			}
+		}
+	case "Lot":
+		for _, l := range r.lots {
+			if l.UUID == uuid {
+				return l.LotNo, nil
+			}
+		}
+	case "AP_Target_Group":
+		for _, g := range r.apTargetGroups {
+			if g.UUID == uuid {
+				return g.GroupNo, nil
+			}
+		}
+	}
+	return "", nil
 }
 
 func (r *MemoryProcurementRepository) GetAllReferenceTargets() ([]models.APTargetGroupReference, error) {
@@ -1203,12 +1591,18 @@ func (r *MemoryProcurementRepository) DeleteRecord(tableName string, id int) err
 		delete(r.grs, id)
 	case "Inventory_Lot":
 		delete(r.lots, id)
+		delete(r.constraintInstances, id)
 	case "Account_Payable":
 		delete(r.aps, id)
 	case "Cost_Allocation":
 		delete(r.cas, id)
 	case "AP_Target_Group":
 		delete(r.apTargetGroups, id)
+	case "Constraint_Profile":
+		delete(r.constraintProfiles, id)
+		delete(r.constraintProfileSteps, id)
+	case "Constraint_Master":
+		delete(r.constraints, id)
 	default:
 		return fmt.Errorf("unsupported table: %s", tableName)
 	}

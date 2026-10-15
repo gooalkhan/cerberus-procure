@@ -3,7 +3,13 @@ export interface ItemMaster {
   sku_code: string;
   name: string;
   vendor_id: number;
+  default_constraint_profile_id: number;
   cbm: number;
+  box_qty: number;
+  boxes_per_pallet: number;
+  box_width: number;
+  box_length: number;
+  box_height: number;
   net_weight: number;
   gross_weight: number;
   remark: string;
@@ -37,16 +43,31 @@ export interface POItem {
   po_item_id: number;
   po_id: number;
   item_id: number;
+  base_qty: number;
   po_qty: number;
   unit_price: number;
   status: string;
   remark: string;
+  created_by?: string;
+  created_at?: string;
 }
 
 export interface POAllocationWarning {
   has_allocation: boolean;
   allocated_lot_count: number;
   total_allocated_amount: number;
+}
+
+export interface POItemAdjustment {
+  adjustment_id: number;
+  po_item_id: number;
+  kind: string;
+  qty_delta: number;
+  old_value: number;
+  new_value: number;
+  reason: string;
+  created_by?: string;
+  created_at?: string;
 }
 
 export interface CommercialInvoice {
@@ -85,6 +106,7 @@ export interface AccountPayable {
   status: string;
   uuid: string;
   remark: string;
+  has_allocation?: boolean;
 }
 
 export interface Container {
@@ -104,6 +126,7 @@ export interface ContainerItem {
   container_id: number;
   ci_id: number;
   bl_id: number;
+  constraint_profile_id: number;
   load_qty: number;
   gross_weight: number;
   net_weight: number;
@@ -129,6 +152,7 @@ export interface BL {
 
 export interface GoodsReceipt {
   gr_id: number;
+  gr_no: string;
   receive_date: string;
   remark: string;
   uuid: string;
@@ -228,6 +252,8 @@ export interface BookingView {
   gross_weight: number;
   net_weight: number;
   cbm: number;
+  master_cbm: number;
+  unit_cbm: number;
   temporary_eta: string | null;
   remark: string;
 }
@@ -316,4 +342,74 @@ export interface APTargetGroupReference {
   description: string;
   amount: number;
   currency: string;
+}
+
+export interface ConstraintProfileStep {
+  constraint_profile_step_id: number;
+  constraint_profile_id: number;
+  constraint_id: number;
+  sequence: number;
+  constraint_type: string;
+  lead_time_days: number;
+  is_optional: boolean;
+  remark: string;
+}
+
+export interface ConstraintMaster {
+  constraint_id: number;
+  name: string;
+  lead_time_days: number;
+  remark: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface ConstraintProfile {
+  constraint_profile_id: number;
+  profile_no: string;
+  name: string;
+  remark: string;
+  uuid: string;
+  steps?: ConstraintProfileStep[];
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface ConstraintAvailability {
+  container_item_id: number;
+  constraint_profile_id: number;
+  profile_name: string;
+  anchor_date: string | null;
+  arrival_to_gr_days: number;
+  total_lead_days: number;
+  expected_ready_date: string | null;
+  steps?: ConstraintProfileStep[];
+}
+
+export interface ConstraintInstance {
+  constraint_instance_id: number;
+  lot_id: number;
+  source_container_item_id: number;
+  constraint_profile_id: number;
+  predecessor_id: number;
+  sequence: number;
+  constraint_type: string;
+  lead_time_days: number;
+  is_optional: boolean;
+  planned_start?: string | null;
+  actual_start?: string | null;
+  planned_end?: string | null;
+  actual_end?: string | null;
+  status: string;
+  remark: string;
+  computed_start?: string | null;
+  computed_end?: string | null;
+}
+
+export interface LotConstraintSchedule {
+  lot_id: number;
+  anchor_date: string | null;
+  instances: ConstraintInstance[];
+  ready_date: string | null;
+  ready_is_actual: boolean;
 }

@@ -14,7 +14,7 @@ const SearchModal: React.FC<SearchModalProps> = ({
   searchTerm: initialSearch,
   onClose,
   onSelect,
-  availableTypes = ['PO', 'CI', 'Container', 'BL', 'GR', 'Lot', 'PO Item', 'Vendor', 'Item', 'Container Item', 'AP Target Group']
+  availableTypes = ['PO', 'CI', 'Container', 'BL', 'GR', 'Lot', 'PO Item', 'Vendor', 'Item', 'Container Item', 'AP Target Group', 'Constraint Profile']
 }) => {
   const [list, setList] = useState<any[]>([])
   const [search, setSearch] = useState(initialSearch)
@@ -40,6 +40,7 @@ const SearchModal: React.FC<SearchModalProps> = ({
         case 'Item': data = await procureApi.getItems(); break;
         case 'Container Item': data = await procureApi.getBookings(); break;
         case 'AP Target Group': data = await procureApi.getAPTargetGroups(); break;
+        case 'Constraint Profile': data = await procureApi.getConstraintProfiles(); break;
         case 'PO Item': {
           const [pos, bookings] = await Promise.all([
             procureApi.getPurchaseOrders(),
@@ -87,6 +88,7 @@ const SearchModal: React.FC<SearchModalProps> = ({
       case 'PO Item': return (item.po_no || '').toLowerCase().includes(s) || String(item.item_id).includes(s)
       case 'Container Item': return (item.container_no || '').toLowerCase().includes(s) || (item.item_name || '').toLowerCase().includes(s)
       case 'AP Target Group': return (item.group_no || '').toLowerCase().includes(s) || (item.group_name || '').toLowerCase().includes(s)
+      case 'Constraint Profile': return (item.profile_no || '').toLowerCase().includes(s) || (item.name || '').toLowerCase().includes(s)
       default: return false
     }
   })
@@ -153,6 +155,7 @@ const SearchModal: React.FC<SearchModalProps> = ({
                       case 'PO Item': no = `${item.po_no} - Item ${item.item_id}`; info = `Not Booked: ${item.not_booked} / Total Qty: ${item.po_qty}`; break;
                       case 'Container Item': no = `${item.container_no} - ${item.item_name}`; info = `Qty: ${item.load_qty} / ${item.status}`; break;
                       case 'AP Target Group': no = item.group_no; info = `${item.group_name || ''} (${item.total_amount?.toLocaleString()} ${item.currency})`; break;
+                      case 'Constraint Profile': no = item.profile_no; info = `${item.name || ''} (${(item.steps || []).length} steps)`; break;
                     }
                     return (
                       <tr key={idx} style={{ cursor: 'pointer' }} onClick={() => onSelect(item)}>

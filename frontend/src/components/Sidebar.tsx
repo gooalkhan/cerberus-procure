@@ -11,6 +11,8 @@ const Sidebar: React.FC<SidebarProps> = ({ activeMenu, setActiveMenu }) => {
     { isDivider: true },
     { id: 'items', label: 'Item Master', icon: '📦' },
     { id: 'vendors', label: 'Vendor Master', icon: '🤝' },
+    { id: 'constraint_profiles', label: 'Constraint Profiles', icon: '⚙️' },
+    { id: 'constraints', label: 'Constraints', icon: '🧩', isSub: true },
     { id: 'pos', label: 'Purchase Orders', icon: '📝' },
     { id: 'logistics', label: 'Logistics (Bookings)', icon: '🚢' },
     { id: 'bls', label: 'BL Management', icon: '📄', isSub: true },

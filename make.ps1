@@ -38,8 +38,17 @@ function Build-Server {
     
     Write-Host "Building Frontend..."
     Push-Location frontend
-    npm run build
+    # npm may write warnings to stderr; with $ErrorActionPreference='Stop' that would
+    # abort the build even on success. Use the exit code instead.
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    npm run build 2>&1 | Out-Host
+    $frontendExit = $LASTEXITCODE
+    $ErrorActionPreference = $prevEAP
     Pop-Location
+    if ($frontendExit -ne 0) {
+        throw "Frontend build failed (exit $frontendExit)"
+    }
     
     if (!(Test-Path "cmd/server/dist")) {
         New-Item -ItemType Directory -Path "cmd/server/dist" -Force | Out-Null
