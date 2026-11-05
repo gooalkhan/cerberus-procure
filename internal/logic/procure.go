@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -1136,6 +1138,25 @@ func (uc *ProcurementUseCase) GetBookingTemplateData() ([]models.BookingTemplate
 }
 
 // BulkCreateContainerItems 대량으로 Container_Item 레코드 생성
+// parseFlexibleDate "YYYY-MM-DD", RFC3339 등 여러 날짜 형식을 허용해 파싱한다.
+func parseFlexibleDate(s string) (time.Time, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return time.Time{}, false
+	}
+	for _, layout := range []string{"2006-01-02", time.RFC3339, "2006-01-02T15:04:05", "2006-01-02 15:04:05"} {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t, true
+		}
+	}
+	// Excel serial date fallback (예: 46054 → 2026-02-01)
+	if n, err := strconv.Atoi(s); err == nil && n > 20000 && n < 80000 {
+		base := time.Date(1899, 12, 30, 0, 0, 0, 0, time.UTC)
+		return base.AddDate(0, 0, n), true
+	}
+	return time.Time{}, false
+}
+
 func (uc *ProcurementUseCase) BulkCreateContainerItems(rows []models.BulkImportRow) (created int, err error) {
 	for _, row := range rows {
 		item := &models.ContainerItem{
@@ -1147,11 +1168,8 @@ func (uc *ProcurementUseCase) BulkCreateContainerItems(rows []models.BulkImportR
 			Remark:      row.Remark,
 		}
 
-		if row.TemporaryETA != "" {
-			t, parseErr := time.Parse("2006-01-02", row.TemporaryETA)
-			if parseErr == nil {
-				item.TemporaryETA = t
-			}
+		if t, ok := parseFlexibleDate(row.TemporaryETA); ok {
+			item.TemporaryETA = t
 		}
 
 		if err := uc.SaveContainerItem(item); err != nil {

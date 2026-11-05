@@ -11,13 +11,7 @@ import AP_TargetGroupDetail from './components/APTargetGroupDetail'
 import CostAllocationDetail from './components/CostAllocationDetail'
 import ConstraintProfileDetail from './components/ConstraintProfileDetail'
 import ConstraintChainEditor from './components/ConstraintChainEditor'
-
-function parseNumberInput(value: string): number {
-  const cleaned = value.replace(/,/g, '').trim();
-  if (cleaned === '' || cleaned === '.') return 0;
-  const num = Number(cleaned);
-  return isNaN(num) ? 0 : num;
-}
+import NumberInput from './components/NumberInput'
 
 function App() {
   const [user, setUser] = useState<User | null>(null)
@@ -417,16 +411,45 @@ function App() {
             ]}
             fetchData={procureApi.getGoodsReceipts}
             onSave={async (gr: any) => {
+              const existingGrId = gr.gr_id;
+              // 저장 전 DB의 기존 Lot ID를 확보 (삭제 대조용)
+              let beforeIds: number[] = [];
+              if (existingGrId) {
+                const before = await procureApi.getInventoryLotsByGRID(existingGrId);
+                beforeIds = before.map((l: any) => l.lot_id);
+              }
+
               await procureApi.saveGoodsReceipt(gr);
-              if (gr.lots) {
+
+              let targetGrId = existingGrId;
+              if (gr.lots && gr.lots.length > 0) {
                 for (const lot of gr.lots) {
-                  let targetGrId = gr.gr_id;
                   if (!targetGrId) {
                     const allGrs = await procureApi.getGoodsReceipts();
                     const lastGr = allGrs[allGrs.length - 1];
-                    targetGrId = lastGr.gr_id;
+                    targetGrId = lastGr ? lastGr.gr_id : 0;
                   }
                   await procureApi.saveInventoryLot({ ...lot, gr_id: targetGrId });
+                }
+              }
+
+              // 삭제 반영: 기존 DB Lot 중 현재 목록(로드된 lot_id)에 없는 것을 삭제
+              if (existingGrId && Array.isArray(gr.lots)) {
+                const keepIds = new Set<number>(
+                  gr.lots.map((l: any) => l.lot_id).filter((id: number) => id > 0)
+                );
+                const toDelete = beforeIds.filter((id) => !keepIds.has(id));
+                for (const id of toDelete) {
+                  try {
+                    const ref = await procureApi.checkReferences('Inventory_Lot', id);
+                    if (!ref.can_delete) {
+                      alert(`Lot ${id}은(는) AP 등에서 참조 중이라 삭제할 수 없습니다.`);
+                      continue;
+                    }
+                    await procureApi.deleteRecord('Inventory_Lot', id);
+                  } catch (e: any) {
+                    alert(`Lot ${id} 삭제 실패: ${e?.message || e}`);
+                  }
                 }
               }
             }}
@@ -750,7 +773,7 @@ function CIDetail({ ci }: { ci: any }) {
           </div>
           <div className="form-group">
             <label>Amount</label>
-            <input type="text" inputMode="decimal" value={newAp.amount} onChange={e => setNewAp({ ...newAp, amount: parseNumberInput(e.target.value) })} />
+            <NumberInput value={newAp.amount} onChange={(v: number) => setNewAp({ ...newAp, amount: v })} />
           </div>
           <div className="form-group">
             <label>Due Date</label>
@@ -1008,7 +1031,11 @@ function LandedGoodsDetail({ gr, onChange }: { gr: any, onChange: (updated: any)
 
   useEffect(() => {
     if (gr.gr_id) {
-      procureApi.getInventoryLotsByGRID(gr.gr_id).then(setLots);
+      procureApi.getInventoryLotsByGRID(gr.gr_id).then((loaded) => {
+        setLots(loaded);
+        // 부모(GR)에도 로드된 lot 목록을 반영 → 저장 시 삭제 대조 가능
+        onChange({ ...gr, lots: loaded });
+      });
     }
   }, [gr.gr_id]);
 
@@ -1129,11 +1156,9 @@ function LandedGoodsDetail({ gr, onChange }: { gr: any, onChange: (updated: any)
                 />
               </td>
               <td>
-                <input
-                  type="text"
-                  inputMode="decimal"
+                <NumberInput
                   value={lot.qty}
-                  onChange={e => handleUpdateLot(idx, 'qty', parseNumberInput(e.target.value))}
+                  onChange={(v: number) => handleUpdateLot(idx, 'qty', v)}
                   style={{ width: '80px', background: 'transparent', border: 'none', color: 'inherit' }}
                 />
               </td>

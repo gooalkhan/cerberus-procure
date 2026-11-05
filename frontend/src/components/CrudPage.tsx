@@ -1,13 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import SearchModal from './SearchModal';
+import NumberInput from './NumberInput';
 import { procureApi } from '../api/procureApi';
-
-function parseNumberInput(value: string): number {
-  const cleaned = value.replace(/,/g, '').trim();
-  if (cleaned === '' || cleaned === '.') return 0;
-  const num = Number(cleaned);
-  return isNaN(num) ? 0 : num;
-}
 
 export interface Column {
   key: string;
@@ -457,10 +451,25 @@ function CrudPage<T extends { [key: string]: any }>({ title, columns, fetchData,
                           <option key={opt} value={opt}>{opt}</option>
                         ))}
                       </select>
+                    ) : col.type === 'number' ? (
+                      <NumberInput
+                        value={selectedItem[col.key]}
+                        disabled={colReadOnly}
+                        style={colReadOnly ? { opacity: 0.6, cursor: 'not-allowed' } : undefined}
+                        onChange={async (num: number) => {
+                          let updatedItem = { ...selectedItem, [col.key]: num };
+                          if (onFieldChange) {
+                            const additionalUpdates = await onFieldChange(col.key, num, updatedItem);
+                            if (additionalUpdates) {
+                              updatedItem = { ...updatedItem, ...additionalUpdates };
+                            }
+                          }
+                          setSelectedItem(updatedItem);
+                        }}
+                      />
                     ) : (
                       <input
-                        type={col.type === 'number' ? 'text' : col.type || 'text'}
-                        inputMode={col.type === 'number' ? 'decimal' : undefined}
+                        type={col.type || 'text'}
                         disabled={colReadOnly}
                         style={colReadOnly ? { opacity: 0.6, cursor: 'not-allowed' } : undefined}
                         value={col.type === 'date' && selectedItem[col.key]
@@ -468,9 +477,7 @@ function CrudPage<T extends { [key: string]: any }>({ title, columns, fetchData,
                           : selectedItem[col.key] ?? ''}
                         onChange={async (e) => {
                           let val: any = e.target.value;
-                          if (col.type === 'number') {
-                            val = parseNumberInput(val);
-                          } else if (col.type === 'date') {
+                          if (col.type === 'date') {
                             val = val ? new Date(val).toISOString() : null;
                           }
                           let updatedItem = { ...selectedItem, [col.key]: val };

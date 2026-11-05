@@ -24,6 +24,33 @@ interface PreviewRow {
   message: string;
 }
 
+// Excel 셀 값(문자열 / Date / serial number)을 YYYY-MM-DD 로 정규화한다.
+function normalizeExcelDate(v: any): string {
+  if (v === undefined || v === null || v === '') return '';
+  if (v instanceof Date && !isNaN(v.getTime())) {
+    const y = v.getFullYear();
+    const m = String(v.getMonth() + 1).padStart(2, '0');
+    const d = String(v.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  if (typeof v === 'number') {
+    const p: any = (XLSX as any).SSF?.parse_date_code?.(v);
+    if (p && p.y) {
+      return `${p.y}-${String(p.m).padStart(2, '0')}-${String(p.d).padStart(2, '0')}`;
+    }
+    return '';
+  }
+  const s = String(v).trim();
+  if (!s) return '';
+  const m = s.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
+  if (m) return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
+  const d = new Date(s);
+  if (!isNaN(d.getTime())) {
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+  return s;
+}
+
 export default function BulkBookingImport({ onComplete }: BulkBookingImportProps) {
   const [loading, setLoading] = useState(false);
   const [downloading, setDownloading] = useState(false);
@@ -121,7 +148,7 @@ export default function BulkBookingImport({ onComplete }: BulkBookingImportProps
 
     try {
       const data = await file.arrayBuffer();
-      const wb = XLSX.read(data, { type: 'array' });
+      const wb = XLSX.read(data, { type: 'array', cellDates: true });
       const ws = wb.Sheets[wb.SheetNames[0]];
       const jsonData = XLSX.utils.sheet_to_json<any>(ws, { header: 1 });
 
@@ -152,7 +179,7 @@ export default function BulkBookingImport({ onComplete }: BulkBookingImportProps
         const loadQty = Number(row[7]);
         const containerInput = row[8] !== undefined ? String(row[8]).trim() : '';
         const blInput = row[9] !== undefined ? String(row[9]).trim() : '';
-        const temporaryETA = row[10] !== undefined ? String(row[10]).trim() : '';
+        const temporaryETA = normalizeExcelDate(row[10]);
         const remark = row[11] !== undefined ? String(row[11]).trim() : '';
 
         const templateRow = templateMap.get(poItemID);
@@ -399,6 +426,7 @@ export default function BulkBookingImport({ onComplete }: BulkBookingImportProps
                     <th>Remaining</th>
                     <th>Container</th>
                     <th>BL</th>
+                    <th>ETA</th>
                     <th>Message</th>
                   </tr>
                 </thead>
@@ -421,6 +449,7 @@ export default function BulkBookingImport({ onComplete }: BulkBookingImportProps
                       <td style={{ textAlign: 'right' }}>{row.remaining_qty}</td>
                       <td>{row.container_id ? `ID:${row.container_id}` : row.container_no || '-'}</td>
                       <td>{row.bl_id ? `ID:${row.bl_id}` : row.bl_no || '-'}</td>
+                      <td>{row.temporary_eta || '-'}</td>
                       <td style={{ fontSize: '0.8rem', color: row.status === 'error' ? '#b91c1c' : row.status === 'warn' ? '#b45309' : '#64748b' }}>
                         {row.message}
                       </td>

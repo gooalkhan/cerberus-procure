@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { POItem, PurchaseOrder, POAllocationWarning, POItemAdjustment } from '../api/models';
 import { procureApi } from '../api/procureApi';
+import NumberInput from './NumberInput';
 import SearchModal from './SearchModal';
 
 function parseNumberInput(value: string): number {
@@ -114,11 +115,44 @@ const POItemDetail: React.FC<POItemDetailProps> = ({ po, onChange }) => {
       alert("Please fill in all AP fields");
       return;
     }
+
+    // 저장되지 않은 PO는 먼저 저장하여 UUID를 확보한 뒤 AP를 연결한다.
+    let poUuid = po.uuid;
+    if (!poUuid) {
+      if (!po.po_no) {
+        alert("PO No를 먼저 입력한 뒤 AP를 추가하세요.");
+        return;
+      }
+      try {
+        await procureApi.savePurchaseOrder(po);
+        const list = await procureApi.getPurchaseOrders();
+        const found: any = list.find((p: any) => p.po_no === po.po_no);
+        if (!found || !found.uuid) {
+          alert("PO 저장 후 UUID를 확인하지 못했습니다. 다시 시도하세요.");
+          return;
+        }
+        poUuid = found.uuid;
+        // 저장된 품목 ID까지 새로고침 → 이후 Save Changes 시 중복 추가 방지
+        let freshItems = po.items;
+        try {
+          const fresh = await procureApi.getPOItems(found.po_id);
+          if (fresh) {
+            freshItems = fresh;
+            setItems(fresh);
+          }
+        } catch { /* ignore */ }
+        onChange({ ...po, ...found, items: freshItems });
+      } catch (e: any) {
+        alert(`PO 저장 실패: ${e?.message || e}`);
+        return;
+      }
+    }
+
     await procureApi.saveAccountPayable({
       ...newAp,
       ap_id: 0,
       vendor_id: po.vendor_id,
-      reference_uuid: po.uuid,
+      reference_uuid: poUuid,
       reference_type: 'PO',
       status: 'unpaid',
       allocation_status: 'Open',
@@ -126,7 +160,9 @@ const POItemDetail: React.FC<POItemDetailProps> = ({ po, onChange }) => {
       local_amount: newAp.amount
     } as any);
     setNewAp({ ap_no: '', currency: po.currency || 'USD', amount: 0, due_date: null });
-    loadAPs();
+    // 방금 확보한 UUID로 AP 목록 갱신 (loadAPs 는 이전 closure 의 po.uuid 사용)
+    const all = await procureApi.getAccountPayables();
+    setAps(all.filter((a: any) => a.reference_uuid === poUuid && a.reference_type === 'PO'));
   };
 
   const updateParent = (newItems: POItem[]) => {
@@ -367,21 +403,17 @@ const POItemDetail: React.FC<POItemDetailProps> = ({ po, onChange }) => {
                           </span>
                         ) : (
                           <div style={{ display: 'flex', gap: '0.3rem', alignItems: 'center' }}>
-                            <input
-                              type="text"
-                              inputMode="decimal"
-                              value={item.po_qty || ''}
+                            <NumberInput
+                              value={item.po_qty}
                               style={{ width: '70px', padding: '0.2rem' }}
-                              onChange={(e) => handleItemChange(idx, 'po_qty', parseNumberInput(e.target.value))}
+                              onChange={(v: number) => handleItemChange(idx, 'po_qty', v)}
                             />
                             {item.po_item_id === 0 ? (
-                              <input
-                                type="text"
-                                inputMode="decimal"
-                                value={item.unit_price || ''}
+                              <NumberInput
+                                value={item.unit_price}
                                 placeholder="단가"
                                 style={{ width: '80px', padding: '0.2rem' }}
-                                onChange={(e) => handleItemChange(idx, 'unit_price', parseNumberInput(e.target.value))}
+                                onChange={(v: number) => handleItemChange(idx, 'unit_price', v)}
                               />
                             ) : (
                               <span style={{ color: 'var(--text-secondary)', minWidth: '60px' }}>{item.unit_price?.toLocaleString()}</span>
@@ -586,7 +618,7 @@ const POItemDetail: React.FC<POItemDetailProps> = ({ po, onChange }) => {
           </div>
           <div className="form-group">
             <label>Amount</label>
-            <input type="text" inputMode="decimal" value={newAp.amount} onChange={e => setNewAp({ ...newAp, amount: parseNumberInput(e.target.value) })} />
+            <NumberInput value={newAp.amount} onChange={(v: number) => setNewAp({ ...newAp, amount: v })} />
           </div>
           <div className="form-group">
             <label>Due Date</label>
