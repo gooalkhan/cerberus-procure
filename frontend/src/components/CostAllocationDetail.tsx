@@ -51,7 +51,7 @@ const CostAllocationDetail: React.FC<CostAllocationDetailProps> = ({ costAllocat
   const [selectedLotIds, setSelectedLotIds] = useState<number[]>([]);
   const [loading, setLoading] = useState(false);
   const [importLoading, setImportLoading] = useState(false);
-  const [apMap, setApMap] = useState<Map<number, { ap_no: string; allocation_type: string; currency: string; local_amount: number; reference_type: string; reference_uuid: string }>>(new Map());
+  const [apMap, setApMap] = useState<Map<number, { ap_no: string; allocation_type: string; currency: string; local_amount: number; reference_type: string; reference_uuid: string; remark: string }>>(new Map());
   const [groupTypeMap, setGroupTypeMap] = useState<Map<string, string>>(new Map());
 
   const lotById = (id: number) => availableLots.find(l => l.lot_id === id);
@@ -138,8 +138,8 @@ const CostAllocationDetail: React.FC<CostAllocationDetailProps> = ({ costAllocat
   // AP 메타정보(AP No 등) 로드
   useEffect(() => {
     procureApi.getAccountPayables().then(list => {
-      const m = new Map<number, { ap_no: string; allocation_type: string; currency: string; local_amount: number; reference_type: string; reference_uuid: string }>();
-      list.forEach(ap => m.set(ap.ap_id, { ap_no: ap.ap_no, allocation_type: ap.allocation_type, currency: ap.currency, local_amount: ap.local_amount, reference_type: ap.reference_type, reference_uuid: ap.reference_uuid }));
+      const m = new Map<number, { ap_no: string; allocation_type: string; currency: string; local_amount: number; reference_type: string; reference_uuid: string; remark: string }>();
+      list.forEach(ap => m.set(ap.ap_id, { ap_no: ap.ap_no, allocation_type: ap.allocation_type, currency: ap.currency, local_amount: ap.local_amount, reference_type: ap.reference_type, reference_uuid: ap.reference_uuid, remark: ap.remark || '' }));
       setApMap(m);
     }).catch(() => {});
   }, []);
@@ -167,6 +167,7 @@ const CostAllocationDetail: React.FC<CostAllocationDetailProps> = ({ costAllocat
       currency: a.currency || info?.currency || '',
       local_amount: a.local_amount || info?.local_amount || 0,
       reference,
+      remark: info?.remark || '',
     };
   };
 
@@ -292,6 +293,20 @@ const CostAllocationDetail: React.FC<CostAllocationDetailProps> = ({ costAllocat
   }, [apAllocs, apMap, groupTypeMap]);
 
   const grandTotal = apRows.reduce((s, r) => s + r.distributed, 0);
+
+  // LOT별 분배 결과 (이번 Cost Allocation에서 각 LOT에 분배된 총액 / QTY 1개당 금액)
+  const results = useMemo(() => {
+    const rows = lots.map(lotId => {
+      const lot = availableLots.find(l => l.lot_id === lotId);
+      const total = apAllocs.reduce((s, a) => s + (a.lots[lotId]?.amount || 0), 0);
+      const qty = lot?.qty || 0;
+      return { lotId, lot, qty, total, perUnit: qty > 0 ? total / qty : 0 };
+    });
+    const totalAmount = rows.reduce((s, r) => s + r.total, 0);
+    const totalQty = rows.reduce((s, r) => s + r.qty, 0);
+    return { rows, totalAmount, totalQty, perUnit: totalQty > 0 ? totalAmount / totalQty : 0 };
+  }, [lots, apAllocs, availableLots]);
+
   const editingAlloc = editingApId !== null ? apAllocs.find(a => a.ap_id === editingApId) : undefined;
   const editingInfo = editingAlloc ? apInfo(editingAlloc) : undefined;
 
@@ -396,6 +411,7 @@ const CostAllocationDetail: React.FC<CostAllocationDetailProps> = ({ costAllocat
                   <th>Allocation Type</th>
                   <th>Local Amount</th>
                   <th>Distributed Amount</th>
+                  <th>Remarks</th>
                 </tr>
               </thead>
               <tbody>
@@ -410,13 +426,64 @@ const CostAllocationDetail: React.FC<CostAllocationDetailProps> = ({ costAllocat
                     <td>{row.allocation_type}</td>
                     <td>{formatNumber(row.local_amount)}</td>
                     <td>{formatNumber(row.distributed)}</td>
+                    <td>{row.remark || '-'}</td>
                   </tr>
                 ))}
               </tbody>
               <tfoot>
                 <tr style={{ fontWeight: 600, background: 'var(--bg-secondary)' }}>
-                  <td colSpan={4} style={{ textAlign: 'right' }}>Total Allocated Amount:</td>
+                  <td colSpan={5} style={{ textAlign: 'right' }}>Total Allocated Amount:</td>
                   <td>{formatNumber(grandTotal)}</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Cost Allocation Results — LOT별 분배 결과 */}
+      <div style={{ marginTop: '1.5rem', borderTop: '1px solid var(--border-color)', paddingTop: '1rem' }}>
+        <h3 style={{ margin: '0 0 0.75rem 0', fontSize: '1rem' }}>
+          Cost Allocation Results
+          <span style={{ fontSize: '0.75rem', fontWeight: 400, color: 'var(--text-secondary)', marginLeft: '0.5rem' }}>
+            (LOT별 분배 총액 / QTY 1개당 분배액)
+          </span>
+        </h3>
+        {results.rows.length === 0 ? (
+          <div style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', padding: '1rem', textAlign: 'center', background: 'var(--bg-secondary)', borderRadius: '6px' }}>
+            분배 결과가 없습니다.
+          </div>
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            <table className="sub-table" style={{ margin: 0, fontSize: '0.8rem' }}>
+              <thead>
+                <tr>
+                  <th style={{ width: '50px' }}>Lot ID</th>
+                  <th>Lot No</th>
+                  <th>Item</th>
+                  <th style={{ textAlign: 'right' }}>Qty</th>
+                  <th style={{ textAlign: 'right' }}>Total Allocated</th>
+                  <th style={{ textAlign: 'right' }}>Per Unit</th>
+                </tr>
+              </thead>
+              <tbody>
+                {results.rows.map(r => (
+                  <tr key={r.lotId}>
+                    <td>{r.lotId}</td>
+                    <td>{r.lot?.lot_no || '-'}</td>
+                    <td>{r.lot?.item_name || '-'}</td>
+                    <td style={{ textAlign: 'right' }}>{r.qty.toLocaleString()}</td>
+                    <td style={{ textAlign: 'right', fontWeight: 600 }}>{formatNumber(r.total)}</td>
+                    <td style={{ textAlign: 'right' }}>{formatNumber(r.perUnit)}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr style={{ fontWeight: 600, background: 'var(--bg-secondary)' }}>
+                  <td colSpan={3} style={{ textAlign: 'right' }}>Total:</td>
+                  <td style={{ textAlign: 'right' }}>{results.totalQty.toLocaleString()}</td>
+                  <td style={{ textAlign: 'right' }}>{formatNumber(results.totalAmount)}</td>
+                  <td style={{ textAlign: 'right' }}>{formatNumber(results.perUnit)}</td>
                 </tr>
               </tfoot>
             </table>

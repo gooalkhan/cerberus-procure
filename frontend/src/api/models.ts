@@ -134,6 +134,7 @@ export interface ContainerItem {
   temporary_eta: string | null;
   uuid: string;
   remark: string;
+  status?: string;
 }
 
 export interface BL {
@@ -145,7 +146,6 @@ export interface BL {
   pod: string;
   carrier: string;
   vessel_name: string;
-  status: string;
   remark: string;
   uuid: string;
 }
@@ -154,6 +154,7 @@ export interface GoodsReceipt {
   gr_id: number;
   gr_no: string;
   receive_date: string;
+  status?: string;
   remark: string;
   uuid: string;
 }
@@ -226,6 +227,7 @@ export interface CostAllocationProposal {
 
 export interface BookingView {
   container_item_id: number;
+  uuid: string;
   container_id: number;
   container_no: string;
   status: string;
@@ -234,7 +236,6 @@ export interface BookingView {
   total_gross_wgt: number;
   bl_id: number;
   bl_no: string;
-  bl_status: string;
   etd: string | null;
   eta: string | null;
   pol: string;
@@ -254,6 +255,7 @@ export interface BookingView {
   cbm: number;
   master_cbm: number;
   unit_cbm: number;
+  constraint_profile_id: number;
   temporary_eta: string | null;
   remark: string;
 }
@@ -380,6 +382,7 @@ export interface ConstraintAvailability {
   constraint_profile_id: number;
   profile_name: string;
   anchor_date: string | null;
+  anchor_source: string;
   arrival_to_gr_days: number;
   total_lead_days: number;
   expected_ready_date: string | null;

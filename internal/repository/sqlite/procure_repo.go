@@ -181,7 +181,6 @@ func migrateProcurement(db *sql.DB) error {
 			POD TEXT,
 			Carrier TEXT,
 			Vessel_Name TEXT,
-			Status TEXT CHECK (Status IN ('Released', 'Partially Shipping', 'Shipping', 'Partially Arrived', 'Arrived')),
 			Remark TEXT,
 			UUID TEXT UNIQUE NOT NULL,
 			CHECK (ETA >= ETD)
@@ -393,6 +392,9 @@ func migrateLegacySchemas(db *sql.DB) error {
 	// 행정 제약 프로파일 참조 컬럼 (Item_Master / Container_Item)
 	_ = migrateConstraintColumns(db)
 
+	// BL.Status 컬럼 제거 (Status는 Container_Item에서 계산)
+	_ = migrateDropBLStatus(db)
+
 	return nil
 }
 
@@ -603,6 +605,43 @@ func recomputePOItemStatuses(db *sql.DB) error {
 		ELSE 'Not Shipped'
 	END`)
 	return err
+}
+
+// migrateDropBLStatus 기존 BL 테이블에서 Status 컬럼을 제거한다.
+// (상태는 이제 Container_Item에서 계산해 표시)
+func migrateDropBLStatus(db *sql.DB) error {
+	var sqlText string
+	if err := db.QueryRow(`SELECT sql FROM sqlite_master WHERE type='table' AND name='BL'`).Scan(&sqlText); err != nil {
+		return nil
+	}
+	if !strings.Contains(sqlText, "Status") {
+		return nil
+	}
+	queries := []string{
+		`CREATE TABLE BL_new (
+			BL_ID INTEGER PRIMARY KEY AUTOINCREMENT,
+			BL_No TEXT UNIQUE NOT NULL,
+			ETD DATETIME NOT NULL,
+			ETA DATETIME NOT NULL,
+			POL TEXT,
+			POD TEXT,
+			Carrier TEXT,
+			Vessel_Name TEXT,
+			Remark TEXT,
+			UUID TEXT UNIQUE NOT NULL,
+			CHECK (ETA >= ETD)
+		)`,
+		`INSERT INTO BL_new (BL_ID, BL_No, ETD, ETA, POL, POD, Carrier, Vessel_Name, Remark, UUID)
+		 SELECT BL_ID, BL_No, ETD, ETA, POL, POD, Carrier, Vessel_Name, Remark, UUID FROM BL`,
+		`DROP TABLE BL`,
+		`ALTER TABLE BL_new RENAME TO BL`,
+	}
+	for _, q := range queries {
+		if _, err := db.Exec(q); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // dropLegacyProcurementTriggers 과거 스키마에 존재하던 파생 로직 트리거를 제거한다.
@@ -1232,7 +1271,7 @@ func (r *SQLiteProcurementRepository) SaveContainer(i *models.Container) error {
 }
 
 func (r *SQLiteProcurementRepository) GetBLs() ([]models.BL, error) {
-	rows, err := r.db.Query("SELECT BL_ID, BL_No, ETD, ETA, IFNULL(POL, ''), IFNULL(POD, ''), IFNULL(Carrier, ''), IFNULL(Vessel_Name, ''), Status, IFNULL(Remark, ''), UUID FROM BL")
+	rows, err := r.db.Query("SELECT BL_ID, BL_No, ETD, ETA, IFNULL(POL, ''), IFNULL(POD, ''), IFNULL(Carrier, ''), IFNULL(Vessel_Name, ''), IFNULL(Remark, ''), UUID FROM BL")
 	if err != nil {
 		return nil, err
 	}
@@ -1240,7 +1279,7 @@ func (r *SQLiteProcurementRepository) GetBLs() ([]models.BL, error) {
 	list := []models.BL{}
 	for rows.Next() {
 		var i models.BL
-		rows.Scan(&i.ID, &i.BLNo, &i.ETD, &i.ETA, &i.POL, &i.POD, &i.Carrier, &i.VesselName, &i.Status, &i.Remark, &i.UUID)
+		rows.Scan(&i.ID, &i.BLNo, &i.ETD, &i.ETA, &i.POL, &i.POD, &i.Carrier, &i.VesselName, &i.Remark, &i.UUID)
 		list = append(list, i)
 	}
 	return list, nil
@@ -1248,8 +1287,8 @@ func (r *SQLiteProcurementRepository) GetBLs() ([]models.BL, error) {
 
 func (r *SQLiteProcurementRepository) SaveBL(i *models.BL) error {
 	if i.ID == 0 {
-		res, err := r.db.Exec("INSERT INTO BL (BL_No, ETD, ETA, POL, POD, Carrier, Vessel_Name, Status, Remark, UUID) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-			i.BLNo, i.ETD, i.ETA, i.POL, i.POD, i.Carrier, i.VesselName, i.Status, i.Remark, i.UUID)
+		res, err := r.db.Exec("INSERT INTO BL (BL_No, ETD, ETA, POL, POD, Carrier, Vessel_Name, Remark, UUID) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+			i.BLNo, i.ETD, i.ETA, i.POL, i.POD, i.Carrier, i.VesselName, i.Remark, i.UUID)
 		if err != nil {
 			return err
 		}
@@ -1257,8 +1296,8 @@ func (r *SQLiteProcurementRepository) SaveBL(i *models.BL) error {
 		i.ID = int(id)
 		return nil
 	}
-	_, err := r.db.Exec("UPDATE BL SET BL_No=?, ETD=?, ETA=?, POL=?, POD=?, Carrier=?, Vessel_Name=?, Status=?, Remark=? WHERE BL_ID=?",
-		i.BLNo, i.ETD, i.ETA, i.POL, i.POD, i.Carrier, i.VesselName, i.Status, i.Remark, i.ID)
+	_, err := r.db.Exec("UPDATE BL SET BL_No=?, ETD=?, ETA=?, POL=?, POD=?, Carrier=?, Vessel_Name=?, Remark=? WHERE BL_ID=?",
+		i.BLNo, i.ETD, i.ETA, i.POL, i.POD, i.Carrier, i.VesselName, i.Remark, i.ID)
 	return err
 }
 
@@ -1421,24 +1460,37 @@ func (r *SQLiteProcurementRepository) GetContainerItemsByContainerID(containerID
 		SELECT
 			ci.Container_Item_ID, ci.PO_Item_ID, IFNULL(ci.Container_ID, 0), IFNULL(ci.CI_ID, 0), IFNULL(ci.BL_ID, 0), IFNULL(ci.Constraint_Profile_ID, 0),
 			IFNULL(ci.Load_Qty, 0),
-			IFNULL(ci.Gross_Weight, 0), IFNULL(ci.Net_Weight, 0), IFNULL(ci.Cbm, 0), ci.Temporary_ETA, IFNULL(ci.UUID, ''), IFNULL(ci.Remark, '')
+			IFNULL(ci.Gross_Weight, 0), IFNULL(ci.Net_Weight, 0), IFNULL(ci.Cbm, 0), ci.Temporary_ETA, IFNULL(ci.UUID, ''), IFNULL(ci.Remark, ''),
+			b.ETD, b.ETA,
+			IFNULL((SELECT SUM(Qty) FROM Inventory_Lot l WHERE l.Container_Item_ID = ci.Container_Item_ID), 0) as Landed_Qty
 		FROM Container_Item ci
+		LEFT JOIN BL b ON ci.BL_ID = b.BL_ID
 		WHERE ci.Container_ID = ?`, containerID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	list := []models.ContainerItem{}
+	now := time.Now()
 	for rows.Next() {
 		var i models.ContainerItem
-		var tempEta *time.Time
-		err := rows.Scan(&i.ID, &i.POItemID, &i.ContainerID, &i.CIID, &i.BLID, &i.ConstraintProfileID, &i.LoadQty, &i.GrossWeight, &i.NetWeight, &i.CBM, &tempEta, &i.UUID, &i.Remark)
+		var tempEta, etd, eta *time.Time
+		var landedQty float64
+		err := rows.Scan(&i.ID, &i.POItemID, &i.ContainerID, &i.CIID, &i.BLID, &i.ConstraintProfileID, &i.LoadQty, &i.GrossWeight, &i.NetWeight, &i.CBM, &tempEta, &i.UUID, &i.Remark, &etd, &eta, &landedQty)
 		if err != nil {
 			return nil, err
 		}
 		if tempEta != nil {
 			i.TemporaryETA = *tempEta
 		}
+		var etdT, etaT time.Time
+		if etd != nil {
+			etdT = *etd
+		}
+		if eta != nil {
+			etaT = *eta
+		}
+		i.Status = models.ComputeContainerItemStatus(i.BLID > 0, etdT, etaT, i.LoadQty, landedQty, now)
 		list = append(list, i)
 	}
 	return list, nil
@@ -1446,15 +1498,19 @@ func (r *SQLiteProcurementRepository) GetContainerItemsByContainerID(containerID
 
 func (r *SQLiteProcurementRepository) GetContainerItemByID(id int) (*models.ContainerItem, error) {
 	var i models.ContainerItem
-	var tempEta *time.Time
+	var tempEta, etd, eta *time.Time
+	var landedQty float64
 	err := r.db.QueryRow(`
 		SELECT
 			ci.Container_Item_ID, ci.PO_Item_ID, IFNULL(ci.Container_ID, 0), IFNULL(ci.CI_ID, 0), IFNULL(ci.BL_ID, 0), IFNULL(ci.Constraint_Profile_ID, 0),
 			IFNULL(ci.Load_Qty, 0),
-			IFNULL(ci.Gross_Weight, 0), IFNULL(ci.Net_Weight, 0), IFNULL(ci.Cbm, 0), ci.Temporary_ETA, IFNULL(ci.UUID, ''), IFNULL(ci.Remark, '')
+			IFNULL(ci.Gross_Weight, 0), IFNULL(ci.Net_Weight, 0), IFNULL(ci.Cbm, 0), ci.Temporary_ETA, IFNULL(ci.UUID, ''), IFNULL(ci.Remark, ''),
+			b.ETD, b.ETA,
+			IFNULL((SELECT SUM(Qty) FROM Inventory_Lot l WHERE l.Container_Item_ID = ci.Container_Item_ID), 0) as Landed_Qty
 		FROM Container_Item ci
+		LEFT JOIN BL b ON ci.BL_ID = b.BL_ID
 		WHERE ci.Container_Item_ID = ?`, id).
-		Scan(&i.ID, &i.POItemID, &i.ContainerID, &i.CIID, &i.BLID, &i.ConstraintProfileID, &i.LoadQty, &i.GrossWeight, &i.NetWeight, &i.CBM, &tempEta, &i.UUID, &i.Remark)
+		Scan(&i.ID, &i.POItemID, &i.ContainerID, &i.CIID, &i.BLID, &i.ConstraintProfileID, &i.LoadQty, &i.GrossWeight, &i.NetWeight, &i.CBM, &tempEta, &i.UUID, &i.Remark, &etd, &eta, &landedQty)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -1464,6 +1520,14 @@ func (r *SQLiteProcurementRepository) GetContainerItemByID(id int) (*models.Cont
 	if tempEta != nil {
 		i.TemporaryETA = *tempEta
 	}
+	var etdT, etaT time.Time
+	if etd != nil {
+		etdT = *etd
+	}
+	if eta != nil {
+		etaT = *eta
+	}
+	i.Status = models.ComputeContainerItemStatus(i.BLID > 0, etdT, etaT, i.LoadQty, landedQty, time.Now())
 	return &i, nil
 }
 
@@ -2000,15 +2064,14 @@ func (r *SQLiteProcurementRepository) GetBookings() ([]models.BookingView, error
 	query := `
 		SELECT 
 			ci.Container_Item_ID,
+			IFNULL(ci.UUID, ''),
 			IFNULL(ci.Container_ID, 0),
 			IFNULL(c.Container_No, ''),
-			IFNULL(c.Status, ''),
 			IFNULL(c.Total_CBM, 0),
 			IFNULL(c.Total_Net_Wgt, 0),
 			IFNULL(c.Total_Gross_Wgt, 0),
 			IFNULL(ci.BL_ID, 0),
 			IFNULL(b.BL_No, ''),
-			IFNULL(b.Status, '') as BL_Status,
 			b.ETD,
 			b.ETA,
 			IFNULL(b.POL, ''),
@@ -2028,8 +2091,10 @@ func (r *SQLiteProcurementRepository) GetBookings() ([]models.BookingView, error
 			IFNULL(ci.Cbm, 0),
 			CASE WHEN IFNULL(ci.Load_Qty, 0) > 0 THEN IFNULL(ci.Cbm, 0) / ci.Load_Qty ELSE 0 END as Unit_CBM,
 			IFNULL(im.CBM, 0) as Master_CBM,
+			IFNULL(ci.Constraint_Profile_ID, 0),
 			ci.Temporary_ETA,
-			IFNULL(ci.Remark, '')
+			IFNULL(ci.Remark, ''),
+			IFNULL((SELECT SUM(Qty) FROM Inventory_Lot l WHERE l.Container_Item_ID = ci.Container_Item_ID), 0) as Landed_Qty
 		FROM Container_Item ci
 		LEFT JOIN Container c ON ci.Container_ID = c.Container_ID
 		LEFT JOIN BL b ON ci.BL_ID = b.BL_ID
@@ -2037,15 +2102,7 @@ func (r *SQLiteProcurementRepository) GetBookings() ([]models.BookingView, error
 		JOIN Purchase_Order p ON pi.PO_ID = p.PO_ID
 		LEFT JOIN Commercial_Invoice ci_tbl ON ci.CI_ID = ci_tbl.CI_ID
 		LEFT JOIN Item_Master im ON pi.Item_ID = im.Item_ID
-		ORDER BY 
-			CASE c.Status 
-				WHEN 'Loaded' THEN 1 
-				WHEN 'Shipping' THEN 2 
-				WHEN 'Arrived' THEN 3 
-				ELSE 4 
-			END,
-			IFNULL(b.ETA, ci.Temporary_ETA) ASC,
-			c.Container_No ASC
+		ORDER BY IFNULL(b.ETA, ci.Temporary_ETA) ASC, c.Container_No ASC
 	`
 	rows, err := r.db.Query(query)
 	if err != nil {
@@ -2058,13 +2115,14 @@ func (r *SQLiteProcurementRepository) GetBookings() ([]models.BookingView, error
 		var b models.BookingView
 		var etd, eta *time.Time
 		var tempEta *time.Time
+		var landedQty float64
 		err := rows.Scan(
-			&b.ContainerItemID, &b.ContainerID, &b.ContainerNo, &b.Status,
+			&b.ContainerItemID, &b.UUID, &b.ContainerID, &b.ContainerNo,
 			&b.TotalCBM, &b.TotalNetWgt, &b.TotalGrossWgt,
-			&b.BLID, &b.BLNo, &b.BLStatus, &etd, &eta,
+			&b.BLID, &b.BLNo, &etd, &eta,
 			&b.POL, &b.POD, &b.Carrier, &b.VesselName,
 			&b.POItemID, &b.POID, &b.PONo, &b.ItemID, &b.ItemName, &b.CIID, &b.CINo, &b.LoadQty,
-			&b.GrossWeight, &b.NetWeight, &b.CBM, &b.UnitCBM, &b.MasterCBM, &tempEta, &b.Remark,
+			&b.GrossWeight, &b.NetWeight, &b.CBM, &b.UnitCBM, &b.MasterCBM, &b.ConstraintProfileID, &tempEta, &b.Remark, &landedQty,
 		)
 		if err != nil {
 			return nil, err
@@ -2080,6 +2138,7 @@ func (r *SQLiteProcurementRepository) GetBookings() ([]models.BookingView, error
 		} else if tempEta != nil {
 			b.ETA = *tempEta
 		}
+		b.Status = models.ComputeContainerItemStatus(b.BLID > 0, b.ETD, b.ETA, b.LoadQty, landedQty, time.Now())
 		list = append(list, b)
 	}
 	return list, nil

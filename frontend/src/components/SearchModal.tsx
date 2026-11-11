@@ -42,11 +42,15 @@ const SearchModal: React.FC<SearchModalProps> = ({
         case 'AP Target Group': data = await procureApi.getAPTargetGroups(); break;
         case 'Constraint Profile': data = await procureApi.getConstraintProfiles(); break;
         case 'PO Item': {
-          const [pos, bookings] = await Promise.all([
+          const [pos, bookings, masters] = await Promise.all([
             procureApi.getPurchaseOrders(),
-            procureApi.getBookings()
+            procureApi.getBookings(),
+            procureApi.getItems()
           ]);
-          
+
+          const skuMap = new Map<number, string>();
+          (masters || []).forEach((m: any) => skuMap.set(m.item_id, m.sku_code));
+
           const bookedQtyMap: Record<number, number> = {};
           bookings.forEach((b: any) => {
             if (b.po_item_id) {
@@ -60,7 +64,13 @@ const SearchModal: React.FC<SearchModalProps> = ({
             allItems.push(...items.map(it => {
               const booked = bookedQtyMap[it.po_item_id] || 0;
               const notBooked = it.po_qty - booked;
-              return { ...it, po_no: po.po_no, id: it.po_item_id, not_booked: notBooked };
+              return {
+                ...it,
+                po_no: po.po_no,
+                id: it.po_item_id,
+                not_booked: notBooked,
+                sku_code: skuMap.get(it.item_id) || '',
+              };
             }));
           }
           data = allItems;
@@ -85,7 +95,7 @@ const SearchModal: React.FC<SearchModalProps> = ({
       case 'Lot': return (item.lot_no || '').toLowerCase().includes(s)
       case 'Vendor': return (item.name || '').toLowerCase().includes(s) || (item.business_reg_no || '').toLowerCase().includes(s)
       case 'Item': return (item.sku_code || '').toLowerCase().includes(s) || (item.name || '').toLowerCase().includes(s)
-      case 'PO Item': return (item.po_no || '').toLowerCase().includes(s) || String(item.item_id).includes(s)
+      case 'PO Item': return (item.po_no || '').toLowerCase().includes(s) || String(item.item_id).includes(s) || (item.sku_code || '').toLowerCase().includes(s)
       case 'Container Item': return (item.container_no || '').toLowerCase().includes(s) || (item.item_name || '').toLowerCase().includes(s)
       case 'AP Target Group': return (item.group_no || '').toLowerCase().includes(s) || (item.group_name || '').toLowerCase().includes(s)
       case 'Constraint Profile': return (item.profile_no || '').toLowerCase().includes(s) || (item.name || '').toLowerCase().includes(s)
@@ -152,7 +162,7 @@ const SearchModal: React.FC<SearchModalProps> = ({
                       case 'Lot': no = item.lot_no; info = `Qty: ${item.qty}`; break;
                       case 'Vendor': no = item.name; info = `Reg: ${item.business_reg_no}`; break;
                       case 'Item': no = item.sku_code; info = item.name; break;
-                      case 'PO Item': no = `${item.po_no} - Item ${item.item_id}`; info = `Not Booked: ${item.not_booked} / Total Qty: ${item.po_qty}`; break;
+                      case 'PO Item': no = `${item.po_no} - ${item.sku_code || `Item ${item.item_id}`}`; info = `Not Booked: ${item.not_booked} / Total Qty: ${item.po_qty}`; break;
                       case 'Container Item': no = `${item.container_no} - ${item.item_name}`; info = `Qty: ${item.load_qty} / ${item.status}`; break;
                       case 'AP Target Group': no = item.group_no; info = `${item.group_name || ''} (${item.total_amount?.toLocaleString()} ${item.currency})`; break;
                       case 'Constraint Profile': no = item.profile_no; info = `${item.name || ''} (${(item.steps || []).length} steps)`; break;

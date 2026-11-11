@@ -9,7 +9,12 @@ interface Props {
 }
 
 const TYPES = ['요건승인', '검역', '통관', '불시검문검사'];
-const fmt = (d: any) => (d ? String(d).split('T')[0] : '');
+const fmt = (d: any) => {
+  if (!d) return '';
+  const s = String(d);
+  if (s.startsWith('0001-01-01')) return ''; // 미입력(zero time)
+  return s.split('T')[0];
+};
 const toISO = (v: string) => (v ? `${v}T00:00:00Z` : null);
 
 const ConstraintChainEditor: React.FC<Props> = ({ lotId, lotNo, onClose, onChanged }) => {

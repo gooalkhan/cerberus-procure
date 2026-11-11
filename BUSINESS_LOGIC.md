@@ -12,14 +12,15 @@
 *   **Container_Item CBM 스냅샷 정책**: `Container_Item.Cbm`은 선적(생성) 시점에 `Item_Master.CBM × Load_Qty`로 스냅샷됩니다. 이후 `Item_Master`의 CBM이 변경되어도 이미 생성된 `Container_Item`에는 영향이 없습니다. 기존 `Container_Item`을 수정할 때 새 CBM(`Item_Master.CBM × Load_Qty`)이 현재 저장값과 다르면, 시스템이 **변경 전/후 CBM을 보여주고 사용자 확인 시에만 업데이트**합니다(거부 시 기존 스냅샷 유지).
 *   **전역 UUID 기반 추적**: 모든 주요 문서(PO, CI, BL, Container, Container_Item, GR, Lot)에 부여된 UUID를 통해 시스템 전체에서 데이터의 기원과 흐름을 즉시 식별할 수 있습니다.
 *   **PO 품목 = (SKU, 단가) 버킷 (A1 정책)**: 하나의 `PO_Item`은 **동일 SKU + 동일 단가**의 버킷 1개이며, `Unit_Price`는 **불변**입니다.
-    *   동일 SKU·동일 단가 추가 → 기존 버킷에 **수량 Delta** 병합
+    *   **최초 PO 입력** 시 동일 SKU·동일 단가 행이 여러 개면 → **하나의 버킷으로 합산해 기준수량(Base_Qty)** 으로 저장 (조정 이력 없음)
+    *   **이후** 동일 SKU·동일 단가 추가 → 기존 버킷에 **수량 Delta** 병합 + 조정 이력 기록
     *   동일 SKU·다른 단가 추가 → **새 PO_Item(새 버킷)** 생성
     *   단가 변경 → 기존 버킷 수량 조정 + 새 버킷 추가로 표현 (in-place 단가 변경 없음)
     *   DB 제약: `UNIQUE(PO_ID, Item_ID, Unit_Price)`
 *   **PO 수량 변경 정책 (하이브리드)**: PO와 Container_Item은 분리되어 있어 부분/과·부족 선적이 가능합니다. PO 수량 변경은 참조 유무에 따라 다르게 관리합니다.
     *   **참조 없음(AP 미연결, Container_Item 미존재)**: 입력 실수 수정을 위해 **직접 수정 허용**.
     *   **참조 있음(AP 연결 또는 Container_Item 존재)**: 기존 품목의 **수량/단가 직접 수정·삭제를 차단**하고, 수량은 `PO_Item_Adjustment`의 **증분(Delta)으로만** 변경합니다(사유·작성자·시각 기록). **신규 품목 추가는 허용**됩니다(동일 SKU·단가면 기존 버킷에 병합). 참조를 제거하면 다시 직접 수정이 허용됩니다.
-    *   **기준 수량(Base_Qty)**: 최초 등록 수량은 불변으로 보존하고, 현행 수량 = 기준 수량 + Σ수량증분 으로 관리합니다.
+    *   **기준 수량(Base_Qty)**: 최초 등록 수량은 불변으로 보존하고, 현행 수량 = 기준 수량 + Σ수량증분 으로 관리합니다. 최초 입력 시 동일 (SKU, 단가) 버킷에 해당하는 여러 행은 **합산되어 기준 수량**이 됩니다.
     *   **취소(Cancelled) 상태 제거**: 취소는 별도 상태 대신 **음수 수량 증분(수량 0까지 감소)**으로 표현합니다.
 
 ### PO_Item 버킷 & 수량 원장 구조 (A1)
@@ -41,7 +42,8 @@ PO(주문)는 **여러 번 개정되는 "계획"** 이고, Container_Item은 **�
 - 수량 변경은 항상 **증분으로 기록**되며, 이력으로부터 임의 시점의 수량을 재구성할 수 있습니다.
 
 #### 3) 동작 규칙
-- **동일 SKU·동일 단가 추가** → 기존 버킷에 **수량 Delta 병합** (새 행 생성 안 함)
+- **최초 입력(신규 버킷)**: 같은 (SKU, 단가) 행이 여러 개면 **합산해 `Base_Qty`로 저장** (조정 이력 없음)
+- **이후 동일 SKU·동일 단가 추가** → 기존 버킷에 **수량 Delta 병합** + 조정 이력(사유·작성자·시각)
 - **동일 SKU·다른 단가 추가** → **새 PO_Item(새 버킷)** 생성
 - **단가 변경** → in-place 변경 금지. **기존 버킷 수량 조정 + 새 버킷 추가**로 표현
 - **취소** → 음수 증분(수량 0까지)
@@ -121,6 +123,15 @@ Lot 배분 금액_i = need_i × scale
 2. **미선적/미입고 항목 제외**: `totalRefBase`에는 아직 선택되지 않았거나 미입고(unlanded)인 품목의 기준량도 포함되므로, 해당 품목의 몫만큼 자동 제외됩니다.
 3. **취소(Cancelled) 품목 제외**: 기준량 집계 시 `Status = 'Cancelled'`인 PO 품목은 제외합니다. PO 표시 금액(Total Amount)이 취소 품목을 제외하고 계산되는 것과 일관성을 유지하기 위함입니다.
 4. **PO 변경 시 비율 재적용**: PO 수량이나 단가가 변경되면 `totalRefBase`가 달라지므로, 각 로트의 공정 몫이 변경된 비율로 재계산됩니다. 기배분 금액은 고정된 채 남은 몫만 새 비율로 재분배됩니다.
+
+### AP 배분 상태 (Allocation Status)
+`Account_Payable.Allocation_Status`는 **배분 원장(`Cost_Allocation_Item`)에서 파생**됩니다.
+
+*   `Σ Allocated_Amount >= AP.Local_Amount` (양수 AP) → **`Closed`** (전액 배분 완료)
+*   음수(크레딧) AP는 반대 방향으로 전액 상계되면 **`Closed`**
+*   일부만 배분됨 → **`Open`**
+*   배분 이력이 없음 → 기존 상태 유지(`Draft`/`Open`), 단 이전에 `Closed`였다면 **`Open`으로 복원**
+*   조회 시마다 원장 기준으로 재계산하고, `SaveCostAllocation`에서도 영향받은 AP(추가/수정/삭제된 항목의 AP)를 재계산해 저장합니다. → AP 금액이 전액 배분되면 자동으로 `Closed`가 됩니다.
 
 ### AP Target Group 배분 (Group AP Allocation)
 여러 개의 PO(또는 CI, BL, Container 등 동일 종류 문서)를 하나로 묶은 **AP Target Group**에 부과된 AP도 동일한 로직으로 배분됩니다.
@@ -225,6 +236,7 @@ Cost_Allocation_가능일 = end_last   (체인의 마지막 제약 완료일)
 *   도달 후에는 §2의 "비용 상속 및 마감" 규칙에 따라 로트 원가를 확정(`Inventory_Lot.Landed_Cost_Per_Unit` 스냅샷)하고 재고를 처분할 수 있습니다.
 *   동일한 GR/체인을 공유하는 여러 로트는 **동일한 가능일**을 가집니다.
 *   **게이트(구현)**: Cost Allocation **로트 선택 목록에서 가능일 미도달 로트를 제외(Hard)** 하고, 배분 계산(`calculate`) 시에도 미도달 로트가 포함되면 **차단**합니다. (제약 없음 / 전 단계 실제완료 / 가능일 ≤ 오늘 이면 통과)
+*   **LG Clearance Status(구현)**: Landed Goods 목록의 상태는 **실제 완료(모든 제약 `Actual_End` 입력)** 기준으로 `Not Cleared` / `Partially Cleared` / `All Cleared`를 계산합니다. (가능일 도달 여부로 판정하는 Cost Allocation 게이트와 구분)
 
 ### 4.6 예시
 
@@ -284,7 +296,7 @@ Cost Allocation 가능일 = end₃  (재고 처분 시점)
 *   입고(GR) 이후에만 행정 절차가 시작되므로, **체인의 앵커는 "도착/입고 시점"** 입니다.
 *   앵커는 문서 진행에 따라 **진화**하며, 동일 공식으로 재계산됩니다:
     `Temporary_ETA → BL.ETA → GR.Receive_Date`
-*   즉, 입고 前에는 `Temporary_ETA`(Container_Item)로 **투영**, 입고 後에는 `GR.Receive_Date`로 **실측 기준**을 삼습니다.
+*   즉, 입고 前에는 `BL.ETA`(없으면 `Temporary_ETA`)로 **투영**, 입고 後에는 `GR.Receive_Date`로 **실측 기준**을 삼습니다.
 
 ### 5.2 룰 계층: Item_Master → Constraint_Profile
 
@@ -311,10 +323,11 @@ Cost Allocation 가능일 = end₃  (재고 처분 시점)
 
 ### 5.4 예상 Cost Allocation 가능일 (투영)
 
-입력된 `Temporary_ETA`를 앵커로, 선택된 프로파일의 단계를 **정방향 합산**합니다(저장 불필요, 조회 시 계산).
+앵커는 **`BL.ETA`(BL 연결·ETA 존재 시) → `Temporary_ETA`(BL ETA 없을 때)** 순으로 선택하고, 선택된 프로파일의 단계를 **정방향 합산**합니다(저장 불필요, 조회 시 계산).
 
 ```
-예상 가능일 = Temporary_ETA
+앵커 = BL.ETA (BL 연결 시) ?? Temporary_ETA
+예상 가능일 = 앵커
             + 도착→입고 리드
             + Σ (선택된 프로파일 단계의 Lead_Time_Days)
 ```

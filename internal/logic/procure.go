@@ -190,19 +190,39 @@ func (uc *ProcurementUseCase) SavePurchaseOrder(po *models.PurchaseOrder) error 
 			}
 		}
 
-		// 2) 신규 품목(A1): 동일 (PO, SKU, 단가) 버킷이 있으면 수량 Delta로 병합, 없으면 새 버킷 생성
+		// 2) 신규 품목(A1): 같은 (PO, SKU, 단가) 입력 행은 하나의 버킷으로 묶는다.
+		//    - 이번 저장에서 처음 생성되는 버킷: 같은 키의 입력 행 수량을 합산해 **기준수량(Base_Qty)** 으로 저장 (조정 이력 없음)
+		//    - 이미 존재하는 버킷: 입력 수량을 Delta로 병합하고 조정 이력 기록
+		type bucketGroup struct{ rows []int }
+		newGroups := map[string]*bucketGroup{}
+		groupOrder := []string{}
 		for i := range po.Items {
 			po.Items[i].POID = po.ID
 			if po.Items[i].ID != 0 {
 				continue
 			}
-			bucket, err := uc.repo.GetPOItemByBucket(po.ID, po.Items[i].ItemID, po.Items[i].UnitPrice)
+			key := fmt.Sprintf("%d|%.10f", po.Items[i].ItemID, po.Items[i].UnitPrice)
+			if _, ok := newGroups[key]; !ok {
+				newGroups[key] = &bucketGroup{}
+				groupOrder = append(groupOrder, key)
+			}
+			newGroups[key].rows = append(newGroups[key].rows, i)
+		}
+		for _, key := range groupOrder {
+			rows := newGroups[key].rows
+			first := &po.Items[rows[0]]
+			bucket, err := uc.repo.GetPOItemByBucket(po.ID, first.ItemID, first.UnitPrice)
 			if err != nil {
 				return err
 			}
 			if bucket != nil {
-				delta := po.Items[i].POQty
-				if delta != 0 {
+				// 기존 버킷 → 각 입력 행을 증분(Delta)으로 병합 + 조정 이력
+				for _, idx := range rows {
+					it := &po.Items[idx]
+					delta := it.POQty
+					if delta == 0 {
+						continue
+					}
 					bucket.POQty += delta
 					if loadQty, e := uc.repo.GetPOLoadQty(bucket.ID); e == nil {
 						bucket.Status = poItemStatusFor(bucket.POQty, loadQty)
@@ -216,16 +236,25 @@ func (uc *ProcurementUseCase) SavePurchaseOrder(po *models.PurchaseOrder) error 
 						QtyDelta:  delta,
 						OldValue:  bucket.POQty - delta,
 						NewValue:  bucket.POQty,
-						Reason:    po.Items[i].Remark,
-						CreatedBy: po.Items[i].CreatedBy,
+						Reason:    it.Remark,
+						CreatedBy: it.CreatedBy,
 					}
 					if err := uc.repo.SavePOItemAdjustment(adj); err != nil {
 						return err
 					}
 				}
 			} else {
-				po.Items[i].BaseQty = po.Items[i].POQty
-				if err := uc.repo.SavePOItem(&po.Items[i]); err != nil {
+				// 새 버킷 → 이번 저장에서 같은 키로 입력된 모든 행의 수량을 합산해 기준수량으로 저장 (조정 이력 없음)
+				total := 0.0
+				for _, idx := range rows {
+					total += po.Items[idx].POQty
+				}
+				if total == 0 {
+					continue
+				}
+				first.BaseQty = total
+				first.POQty = total
+				if err := uc.repo.SavePOItem(first); err != nil {
 					return err
 				}
 			}
@@ -402,7 +431,20 @@ func (uc *ProcurementUseCase) SaveCommercialInvoice(ci *models.CommercialInvoice
 
 // Account Payable
 func (uc *ProcurementUseCase) GetAccountPayables() ([]models.AccountPayable, error) {
-	return uc.repo.GetAccountPayables()
+	list, err := uc.repo.GetAccountPayables()
+	if err != nil {
+		return nil, err
+	}
+	// 배분 상태(Alloc Status)는 배분 원장에서 파생한다.
+	// Local_Amount 전액이 배분되면 Closed, 일부면 Open.
+	for i := range list {
+		hasAlloc, allocated, err := uc.repo.GetAPAllocatedAmount(list[i].ID)
+		if err != nil {
+			continue
+		}
+		list[i].AllocationStatus = models.ComputeAPAllocationStatus(list[i].LocalAmount, allocated, hasAlloc, list[i].AllocationStatus)
+	}
+	return list, nil
 }
 
 func (uc *ProcurementUseCase) SaveAccountPayable(ap *models.AccountPayable) error {
@@ -453,12 +495,44 @@ func (uc *ProcurementUseCase) SaveBL(bl *models.BL) error {
 	if bl.UUID == "" {
 		bl.UUID = uuid.New().String()
 	}
+	bl.BLNo = strings.TrimSpace(bl.BLNo)
+	if bl.BLNo == "" {
+		return errors.New("BL No는 필수입니다.")
+	}
+	// BL No 중복 검사 (자기 자신 제외) — SQLite UNIQUE 제약과 별개로 앱 레벨에서도 보장
+	list, err := uc.repo.GetBLs()
+	if err != nil {
+		return err
+	}
+	for _, ex := range list {
+		if ex.ID != bl.ID && ex.BLNo == bl.BLNo {
+			return fmt.Errorf("이미 존재하는 BL No입니다: %s", bl.BLNo)
+		}
+	}
 	return uc.repo.SaveBL(bl)
 }
 
 // Goods Receipt & Inventory
 func (uc *ProcurementUseCase) GetGoodsReceipts() ([]models.GoodsReceipt, error) {
-	return uc.repo.GetGoodsReceipts()
+	list, err := uc.repo.GetGoodsReceipts()
+	if err != nil {
+		return nil, err
+	}
+	// LG(GR)별 행정 제약 클리어 상태 계산 (포함 Lot들의 제약 체인 완료 여부)
+	for i := range list {
+		lots, err := uc.repo.GetInventoryLotsByGRID(list[i].ID)
+		if err != nil {
+			continue
+		}
+		cleared := 0
+		for _, lot := range lots {
+			if ok, _ := uc.isLotConstraintCleared(lot.ID); ok {
+				cleared++
+			}
+		}
+		list[i].Status = models.ComputeClearanceStatus(cleared, len(lots))
+	}
+	return list, nil
 }
 
 func (uc *ProcurementUseCase) SaveGoodsReceipt(gr *models.GoodsReceipt) error {
@@ -526,6 +600,19 @@ func (uc *ProcurementUseCase) isLotConstraintReady(lotID int) (bool, error) {
 		return true, nil
 	}
 	return false, nil
+}
+
+// isLotConstraintCleared LG Status용: Lot의 모든 행정 제약이 실제 완료(Actual_End)되었는지.
+// (Cost Allocation 게이트의 날짜 기반 readiness와 달리, 실제 완료 입력만 인정)
+func (uc *ProcurementUseCase) isLotConstraintCleared(lotID int) (bool, error) {
+	sched, err := uc.GetLotConstraintSchedule(lotID)
+	if err != nil {
+		return false, err
+	}
+	if len(sched.Instances) == 0 {
+		return true, nil
+	}
+	return sched.ReadyIsActual, nil
 }
 
 // filterReadyCostAllocationLots Cost Allocation 가능일 미도달(행정 절차 미완료) 로트를 제외한다. (Hard gate)
@@ -654,7 +741,7 @@ func (uc *ProcurementUseCase) CalculateCostAllocation(lotIDs []int) ([]models.Co
 	}
 
 	// Find APs matching reference UUIDs (or group members) and not fully allocated
-	aps, err := uc.repo.GetAccountPayables()
+	aps, err := uc.GetAccountPayables()
 	if err != nil {
 		return nil, err
 	}
@@ -934,6 +1021,7 @@ func (uc *ProcurementUseCase) SaveCostAllocation(ca *models.CostAllocation) erro
 	if err := uc.repo.SaveCostAllocation(ca); err != nil {
 		return err
 	}
+	affectedAPs := map[int]bool{}
 	if ca.Items != nil {
 		// 수정 시 화면에서 제거된 기존 항목을 삭제 (reconciliation)
 		if ca.ID > 0 {
@@ -946,6 +1034,9 @@ func (uc *ProcurementUseCase) SaveCostAllocation(ca *models.CostAllocation) erro
 					}
 				}
 				for _, ex := range existing {
+					if ex.APID > 0 {
+						affectedAPs[ex.APID] = true
+					}
 					if !keep[ex.ID] {
 						if err := uc.repo.DeleteCostAllocationItem(ex.ID); err != nil {
 							return err
@@ -956,7 +1047,28 @@ func (uc *ProcurementUseCase) SaveCostAllocation(ca *models.CostAllocation) erro
 		}
 		for i := range ca.Items {
 			ca.Items[i].CostAllocationID = ca.ID
+			if ca.Items[i].APID > 0 {
+				affectedAPs[ca.Items[i].APID] = true
+			}
 			if err := uc.repo.SaveCostAllocationItem(&ca.Items[i]); err != nil {
+				return err
+			}
+		}
+	}
+	// 영향받은 AP들의 배분 상태를 원장 기준으로 재계산해 저장한다.
+	for apID := range affectedAPs {
+		ap, err := uc.repo.GetAccountPayableByID(apID)
+		if err != nil || ap == nil {
+			continue
+		}
+		hasAlloc, allocated, err := uc.repo.GetAPAllocatedAmount(apID)
+		if err != nil {
+			continue
+		}
+		status := models.ComputeAPAllocationStatus(ap.LocalAmount, allocated, hasAlloc, ap.AllocationStatus)
+		if ap.AllocationStatus != status {
+			ap.AllocationStatus = status
+			if err := uc.repo.SaveAccountPayable(ap); err != nil {
 				return err
 			}
 		}
@@ -1158,11 +1270,42 @@ func parseFlexibleDate(s string) (time.Time, bool) {
 }
 
 func (uc *ProcurementUseCase) BulkCreateContainerItems(rows []models.BulkImportRow) (created int, err error) {
+	// 엑셀의 Container No / BL No를 기존(사전 입력) 문서에 연결할 수 있도록 맵 구성
+	containerByNo := map[string]int{}
+	if cs, e := uc.repo.GetContainers(); e == nil {
+		for _, c := range cs {
+			if strings.TrimSpace(c.ContainerNo) != "" {
+				containerByNo[strings.TrimSpace(c.ContainerNo)] = c.ID
+			}
+		}
+	}
+	blByNo := map[string]int{}
+	if bls, e := uc.repo.GetBLs(); e == nil {
+		for _, b := range bls {
+			if strings.TrimSpace(b.BLNo) != "" {
+				blByNo[strings.TrimSpace(b.BLNo)] = b.ID
+			}
+		}
+	}
+
 	for _, row := range rows {
+		containerID := row.ContainerID
+		if containerID <= 0 && strings.TrimSpace(row.ContainerNo) != "" {
+			if id, ok := containerByNo[strings.TrimSpace(row.ContainerNo)]; ok {
+				containerID = id
+			}
+		}
+		blID := row.BLID
+		if blID <= 0 && strings.TrimSpace(row.BLNo) != "" {
+			if id, ok := blByNo[strings.TrimSpace(row.BLNo)]; ok {
+				blID = id
+			}
+		}
+
 		item := &models.ContainerItem{
 			POItemID:    row.POItemID,
-			ContainerID: row.ContainerID,
-			BLID:        row.BLID,
+			ContainerID: containerID,
+			BLID:        blID,
 			LoadQty:     row.LoadQty,
 			UUID:        "",
 			Remark:      row.Remark,
@@ -1394,8 +1537,24 @@ func (uc *ProcurementUseCase) ComputeConstraintAvailability(containerItemID int)
 	res := &models.ConstraintAvailability{
 		ContainerItemID: containerItemID,
 		ProfileID:       profileID,
-		AnchorDate:      ci.TemporaryETA,
 		ArrivalToGRDays: ArrivalToGRLeadDays,
+	}
+	// 앵커 진화: Temporary_ETA → BL.ETA (BL 연결 시) → (입고 후에는 Lot 스케줄에서 GR일 사용)
+	// Temporary_ETA가 없더라도 BL.ETA가 있으면 그 값을 앵커로 사용한다.
+	res.AnchorDate = ci.TemporaryETA
+	if !ci.TemporaryETA.IsZero() {
+		res.AnchorSource = "Temporary ETA"
+	}
+	if ci.BLID > 0 {
+		if bls, err := uc.repo.GetBLs(); err == nil {
+			for _, bl := range bls {
+				if bl.ID == ci.BLID && !bl.ETA.IsZero() {
+					res.AnchorDate = bl.ETA
+					res.AnchorSource = "BL ETA"
+					break
+				}
+			}
+		}
 	}
 	if profileID > 0 {
 		if p, _ := uc.repo.GetConstraintProfileByID(profileID); p != nil {

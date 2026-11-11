@@ -120,7 +120,7 @@ func (r *MemoryProcurementRepository) seed() {
 	r.containers[c2.ID] = c2
 
 	// Mock BLs
-	b1 := models.BL{ID: 1, BLNo: "BL-999-001", ETD: time.Now().AddDate(0, 0, -10), ETA: time.Now().AddDate(0, 0, 5), VesselName: "Cerberus Star", Status: "Shipping", UUID: "bl-uuid-1"}
+	b1 := models.BL{ID: 1, BLNo: "BL-999-001", ETD: time.Now().AddDate(0, 0, -10), ETA: time.Now().AddDate(0, 0, 5), VesselName: "Cerberus Star", UUID: "bl-uuid-1"}
 	r.bls[b1.ID] = b1
 
 	// Mock CIs
@@ -734,7 +734,24 @@ func (r *MemoryProcurementRepository) GetContainerItemsByContainerID(containerID
 	if list == nil {
 		return []models.ContainerItem{}, nil
 	}
-	return list, nil
+	out := make([]models.ContainerItem, 0, len(list))
+	for _, i := range list {
+		out = append(out, r.withComputedStatus(i))
+	}
+	return out, nil
+}
+
+// withComputedStatus 호출자가 RLock을 보유한 상태에서 계산 상태를 채운다.
+func (r *MemoryProcurementRepository) withComputedStatus(ci models.ContainerItem) models.ContainerItem {
+	bl := r.bls[ci.BLID]
+	landed := 0.0
+	for _, lot := range r.lots {
+		if lot.ContainerItemID == ci.ID {
+			landed += lot.Qty
+		}
+	}
+	ci.Status = models.ComputeContainerItemStatus(ci.BLID > 0, bl.ETD, bl.ETA, ci.LoadQty, landed, time.Now())
+	return ci
 }
 
 func (r *MemoryProcurementRepository) SaveContainerItem(i *models.ContainerItem) error {
@@ -766,7 +783,7 @@ func (r *MemoryProcurementRepository) GetContainerItemByID(id int) (*models.Cont
 	for _, items := range r.containerItems {
 		for _, it := range items {
 			if it.ID == id {
-				cc := it
+				cc := r.withComputedStatus(it)
 				return &cc, nil
 			}
 		}
@@ -975,17 +992,24 @@ func (r *MemoryProcurementRepository) GetBookings() ([]models.BookingView, error
 				eta = ci.TemporaryETA
 			}
 
+			landedQty := 0.0
+			for _, lot := range r.lots {
+				if lot.ContainerItemID == ci.ID {
+					landedQty += lot.Qty
+				}
+			}
+
 			list = append(list, models.BookingView{
 				ContainerItemID: ci.ID,
+				UUID:            ci.UUID,
 				ContainerID:     ci.ContainerID,
 				ContainerNo:     container.ContainerNo,
-				Status:          container.Status,
+				Status:          models.ComputeContainerItemStatus(ci.BLID > 0, bl.ETD, bl.ETA, ci.LoadQty, landedQty, time.Now()),
 				TotalCBM:        container.TotalCBM,
 				TotalNetWgt:     container.TotalNetWgt,
 				TotalGrossWgt:   container.TotalGrossWgt,
 				BLID:            ci.BLID,
 				BLNo:            bl.BLNo,
-				BLStatus:        bl.Status,
 				ETD:             bl.ETD,
 				ETA:             eta,
 				POL:             bl.POL,
@@ -1003,14 +1027,15 @@ func (r *MemoryProcurementRepository) GetBookings() ([]models.BookingView, error
 				GrossWeight:     ci.GrossWeight,
 				NetWeight:       ci.NetWeight,
 				CBM:             ci.CBM,
+				ConstraintProfileID: ci.ConstraintProfileID,
 				TemporaryETA:    ci.TemporaryETA,
 				Remark:          ci.Remark,
 			})
 		}
 	}
 
-	// Sort: Status (Loaded, Shipping, Arrived), ETA, ContainerNo
-	statusOrder := map[string]int{"Loaded": 1, "Shipping": 2, "Arrived": 3}
+	// Sort: 계산된 Status, ETA, ContainerNo
+	statusOrder := map[string]int{"Expected": 1, "BL Released": 2, "Shipping": 3, "Arrived": 4, "Partially Landed": 5, "Landed": 6}
 	sort.Slice(list, func(i, j int) bool {
 		si := statusOrder[list[i].Status]
 		sj := statusOrder[list[j].Status]

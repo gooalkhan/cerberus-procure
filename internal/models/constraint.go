@@ -45,7 +45,8 @@ type ConstraintAvailability struct {
 	ContainerItemID   int                     `json:"container_item_id"`
 	ProfileID         int                     `json:"constraint_profile_id"`
 	ProfileName       string                  `json:"profile_name"`
-	AnchorDate        time.Time               `json:"anchor_date"` // 앵커(Temporary_ETA 등)
+	AnchorDate        time.Time               `json:"anchor_date"` // 앵커(BL ETA / Temporary_ETA 등)
+	AnchorSource      string                  `json:"anchor_source"` // 앵커 출처: "BL ETA" | "Temporary ETA" | ""
 	ArrivalToGRDays   int                     `json:"arrival_to_gr_days"`
 	TotalLeadDays     int                     `json:"total_lead_days"`
 	ExpectedReadyDate time.Time               `json:"expected_ready_date"`

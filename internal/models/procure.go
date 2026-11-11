@@ -164,6 +164,7 @@ type ContainerItem struct {
 	TemporaryETA time.Time `json:"temporary_eta"`
 	UUID         string    `json:"uuid"`
 	Remark       string    `json:"remark"`
+	Status       string    `json:"status"` // 계산값(파생): Expected / BL Released / Shipping / Arrived / Partially Landed / Landed
 }
 
 // BL 선하증권 정보
@@ -176,7 +177,6 @@ type BL struct {
 	POD        string    `json:"pod"`
 	Carrier    string    `json:"carrier"`
 	VesselName string    `json:"vessel_name"`
-	Status     string    `json:"status"`
 	Remark     string    `json:"remark"`
 	UUID       string    `json:"uuid"`
 }
@@ -186,6 +186,7 @@ type GoodsReceipt struct {
 	ID          int       `json:"gr_id"`
 	GRNo        string    `json:"gr_no"`
 	ReceiveDate time.Time `json:"receive_date"`
+	Status      string    `json:"status"` // 계산값: Not Cleared / Partially Cleared / All Cleared
 	Remark      string    `json:"remark"`
 	CreatedBy   string    `json:"created_by"`
 	CreatedAt   time.Time `json:"created_at"`
@@ -301,6 +302,7 @@ type POAllocationWarning struct {
 // BookingView 물류 선적 조회를 위한 통합 뷰 모델
 type BookingView struct {
 	ContainerItemID int       `json:"container_item_id"`
+	UUID            string    `json:"uuid"` // AP 등 참조 연결용 Container_Item UUID
 	ContainerID     int       `json:"container_id"`
 	ContainerNo     string    `json:"container_no"`
 	Status          string    `json:"status"`
@@ -309,7 +311,6 @@ type BookingView struct {
 	TotalGrossWgt   float64   `json:"total_gross_wgt"`
 	BLID            int       `json:"bl_id"`
 	BLNo            string    `json:"bl_no"`
-	BLStatus        string    `json:"bl_status"`
 	ETD             time.Time `json:"etd"`
 	ETA             time.Time `json:"eta"`
 	POL             string    `json:"pol"`
@@ -329,6 +330,7 @@ type BookingView struct {
 	CBM             float64   `json:"cbm"`
 	MasterCBM       float64   `json:"master_cbm"`
 	UnitCBM         float64   `json:"unit_cbm"`
+	ConstraintProfileID int   `json:"constraint_profile_id"`
 	TemporaryETA    time.Time `json:"temporary_eta"`
 	Remark          string    `json:"remark"`
 }

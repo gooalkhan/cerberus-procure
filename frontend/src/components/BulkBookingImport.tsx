@@ -161,10 +161,22 @@ export default function BulkBookingImport({ onComplete }: BulkBookingImportProps
       const rows = jsonData.slice(1) as any[][];
       const preview: PreviewRow[] = [];
 
-      // 기존 템플릿 데이터를 가져와서 remaining_qty 확인
-      const templateData = await procureApi.getBookingTemplate();
+      // 기존 템플릿 데이터 + 사전 입력된 Container/BL (No → ID 매칭용)
+      const [templateData, containerList, blList] = await Promise.all([
+        procureApi.getBookingTemplate(),
+        procureApi.getContainers(),
+        procureApi.getBLs(),
+      ]);
       const templateMap = new Map<number, BookingTemplateRow>();
       templateData.forEach((t: BookingTemplateRow) => templateMap.set(t.po_item_id, t));
+      const containerByNo = new Map<string, number>();
+      (containerList || []).forEach((c: any) => {
+        if (c.container_no) containerByNo.set(String(c.container_no).trim().toUpperCase(), c.container_id);
+      });
+      const blByNo = new Map<string, number>();
+      (blList || []).forEach((b: any) => {
+        if (b.bl_no) blByNo.set(String(b.bl_no).trim().toUpperCase(), b.bl_id);
+      });
 
       for (let i = 0; i < rows.length; i++) {
         const row = rows[i];
@@ -194,20 +206,32 @@ export default function BulkBookingImport({ onComplete }: BulkBookingImportProps
         let blNo = '';
 
         if (containerInput) {
-          const numVal = Number(containerInput);
-          if (!isNaN(numVal) && numVal > 0) {
-            containerID = numVal;
+          const key = containerInput.trim().toUpperCase();
+          if (containerByNo.has(key)) {
+            containerID = containerByNo.get(key)!;
+            containerNo = containerInput.trim();
           } else {
-            containerNo = containerInput;
+            const numVal = Number(containerInput);
+            if (!isNaN(numVal) && numVal > 0) {
+              containerID = numVal;
+            } else {
+              containerNo = containerInput;
+            }
           }
         }
 
         if (blInput) {
-          const numVal = Number(blInput);
-          if (!isNaN(numVal) && numVal > 0) {
-            blID = numVal;
+          const key = blInput.trim().toUpperCase();
+          if (blByNo.has(key)) {
+            blID = blByNo.get(key)!;
+            blNo = blInput.trim();
           } else {
-            blNo = blInput;
+            const numVal = Number(blInput);
+            if (!isNaN(numVal) && numVal > 0) {
+              blID = numVal;
+            } else {
+              blNo = blInput;
+            }
           }
         }
 
@@ -229,6 +253,15 @@ export default function BulkBookingImport({ onComplete }: BulkBookingImportProps
         } else if (loadQty > remainingQty && status !== 'error') {
           status = 'warn';
           messages.push(`Load Qty (${loadQty}) exceeds remaining (${remainingQty})`);
+        }
+
+        if (containerInput && containerID === 0) {
+          if (status !== 'error') status = 'warn';
+          messages.push(`Container not found: ${containerInput}`);
+        }
+        if (blInput && blID === 0) {
+          if (status !== 'error') status = 'warn';
+          messages.push(`BL not found: ${blInput}`);
         }
 
         preview.push({

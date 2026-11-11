@@ -161,7 +161,7 @@ Item Master  ·  edit
 ### 6.4 Bookings / Container_Item (change)
 
 * Add `constraint_profile_id` select, **auto-filled from the SKU default**, overridable.
-* Show a read-only **projected** availability from `Temporary_ETA` (no persistence, §5.4).
+* Show a read-only **projected** availability from `BL.ETA` (fallback: `Temporary_ETA`) (no persistence, §5.4).
 
 ```
 Container_Item  ·  edit

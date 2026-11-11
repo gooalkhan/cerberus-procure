@@ -218,7 +218,7 @@ function App() {
               { key: 'container_item_id', label: 'ID', formHidden: true, filterType: 'none' },
               { key: 'container_no', label: 'Container No', formHidden: true },
               { key: 'bl_no', label: 'BL No', formHidden: true },
-              { key: 'status', label: 'Status', filterType: 'select', filterOptions: ['Loaded', 'Shipping', 'Arrived'], formHidden: true },
+              { key: 'status', label: 'Status', filterType: 'select', filterOptions: ['Expected', 'BL Released', 'Shipping', 'Arrived', 'Partially Landed', 'Landed'], formHidden: true },
               { key: 'eta', label: 'ETA', type: 'date', formHidden: true },
               { key: 'etd', label: 'ETD', type: 'date', formHidden: true },
               { key: 'container_id', label: 'Container ID', type: 'number', tableHidden: true, searchType: 'Container' },
@@ -269,7 +269,7 @@ function App() {
                 remark: booking.remark || '',
               });
             }}
-            emptyItem={{ container_item_id: 0, container_id: 0, container_no: '', status: 'Loaded', total_cbm: 0, total_net_wgt: 0, total_gross_wgt: 0, bl_id: 0, bl_no: '', bl_status: 'Released', etd: null, eta: null, pol: '', pod: '', carrier: '', vessel_name: '', po_item_id: 0, item_id: 0, ci_id: 0, constraint_profile_id: 0, load_qty: 0, gross_weight: 0, net_weight: 0, cbm: 0, master_cbm: 0, unit_cbm: 0, temporary_eta: null, uuid: '', remark: '' }}
+            emptyItem={{ container_item_id: 0, container_id: 0, container_no: '', status: 'Expected', total_cbm: 0, total_net_wgt: 0, total_gross_wgt: 0, bl_id: 0, bl_no: '', etd: null, eta: null, pol: '', pod: '', carrier: '', vessel_name: '', po_item_id: 0, item_id: 0, ci_id: 0, constraint_profile_id: 0, load_qty: 0, gross_weight: 0, net_weight: 0, cbm: 0, master_cbm: 0, unit_cbm: 0, temporary_eta: null, uuid: '', remark: '' }}
             renderDetail={(booking) => <BookingFlow booking={booking} />}
             tableName="Container_Item"
             idField="container_item_id"
@@ -282,7 +282,6 @@ function App() {
             columns={[
               { key: 'bl_id', label: 'ID', formHidden: true, filterType: 'none' },
               { key: 'bl_no', label: 'BL No' },
-              { key: 'status', label: 'Status', filterType: 'select', filterOptions: ['Released', 'Partially Shipping', 'Shipping', 'Partially Arrived', 'Arrived'] },
               { key: 'etd', label: 'ETD', type: 'date' },
               { key: 'eta', label: 'ETA', type: 'date' },
               { key: 'pol', label: 'POL' },
@@ -293,7 +292,7 @@ function App() {
             ]}
             fetchData={procureApi.getBLs}
             onSave={procureApi.saveBL}
-            emptyItem={{ bl_id: 0, bl_no: '', etd: new Date().toISOString(), eta: new Date().toISOString(), pol: '', pod: '', carrier: '', vessel_name: '', status: 'Released', remark: '', uuid: '' }}
+            emptyItem={{ bl_id: 0, bl_no: '', etd: new Date().toISOString(), eta: new Date().toISOString(), pol: '', pod: '', carrier: '', vessel_name: '', remark: '', uuid: '' }}
             renderDetail={(bl) => <BLDetail bl={bl} />}
             tableName="BL"
             idField="bl_id"
@@ -406,6 +405,7 @@ function App() {
               { key: 'gr_id', label: 'ID', formHidden: true, filterType: 'none' },
               { key: 'gr_no', label: 'GR No' },
               { key: 'receive_date', label: 'Receive Date', type: 'date' },
+              { key: 'status', label: 'Status', formHidden: true, filterType: 'select', filterOptions: ['Not Cleared', 'Partially Cleared', 'All Cleared'] },
               { key: 'remark', label: 'Remark', fullWidth: true },
               { key: 'divider_lots', label: '', divider: true },
             ]}
@@ -607,7 +607,11 @@ function APDetail({ ap, onChange }: { ap: any, onChange: (updated: any) => void 
           <label>Reference Type</label>
           <select
             value={ap.reference_type}
-            onChange={e => onChange({ ...ap, reference_type: e.target.value })}
+            onChange={e => {
+              onChange({ ...ap, reference_type: e.target.value, reference_uuid: '' })
+              setRefNo('')
+              setResolvedNo('')
+            }}
           >
             {['PO', 'CI', 'Container', 'BL', 'GR', 'Lot', 'Container Item', 'AP Target Group'].map(t => (
               <option key={t} value={t}>{t}</option>
@@ -1012,7 +1016,8 @@ function BookingFlow({ booking }: { booking: any }) {
       </div>
       {avail && (
         <div style={{ marginTop: '1rem', padding: '0.75rem 1rem', background: 'rgba(56,189,248,0.08)', border: '1px solid rgba(56,189,248,0.3)', borderRadius: '8px', fontSize: '0.85rem' }}>
-          ▶ 예상 Cost Allocation 가능일: <strong>{avail.expected_ready_date ? String(avail.expected_ready_date).split('T')[0] : '미정 (Temporary ETA 필요)'}</strong>
+          ▶ 예상 Cost Allocation 가능일: <strong>{avail.expected_ready_date && !String(avail.expected_ready_date).startsWith('0001-01-01') ? String(avail.expected_ready_date).split('T')[0] : '미정 (Temporary ETA 또는 BL ETA 필요)'}</strong>
+          {avail.anchor_source ? <span style={{ color: 'var(--text-secondary)' }}> · 앵커: {avail.anchor_source}{avail.anchor_date && !String(avail.anchor_date).startsWith('0001-01-01') ? ` (${String(avail.anchor_date).split('T')[0]})` : ''}</span> : null}
           {avail.profile_name ? <span style={{ color: 'var(--text-secondary)' }}> · {avail.profile_name} (도착→입고 {avail.arrival_to_gr_days}일 + 제약 {avail.total_lead_days - avail.arrival_to_gr_days}일 = {avail.total_lead_days}일)</span> : null}
         </div>
       )}
